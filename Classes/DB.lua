@@ -19,6 +19,7 @@ local DB = {
         "PlusOnes",
         "RecentlyAwardedItems",
         "RollOff",
+        "RollingSR",
         "Settings",
         "SoftRes",
         "TMB",

@@ -113,6 +113,7 @@ Classes/Exporter.lua
 Classes/RollerUI.lua
 Classes/AutoRoll.lua
 Classes/ItemDataManager.lua
+Classes/RollingSR.lua
 Classes/RollOff.lua
 Classes/GroupLoot.lua
 Classes/MasterLooterUI.lua

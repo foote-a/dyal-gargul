@@ -32,7 +32,7 @@ function Importer:draw()
     Window:SetTitle((L["Gargul v%s"]):format(GL.version));
     Window:SetLayout("Flow");
     Window:SetWidth(600);
-    Window:SetHeight(480);
+    Window:SetHeight(580);
     Window:EnableResize(false);
     Window.statustext:GetParent():Hide(); -- Hide the statustext bar
     Window:SetCallback("OnClose", function ()
@@ -60,12 +60,33 @@ function Importer:draw()
     SoftResBox:DisableButton(true);
     SoftResBox:SetFocus();
     SoftResBox:SetLabel("");
-    SoftResBox:SetNumLines(20);
+    SoftResBox:SetNumLines(14);
     SoftResBox:SetMaxLetters(999999999);
     Window:AddChild(SoftResBox);
 
     SoftResBox:SetCallback("OnTextChanged", function (_, _, text)
         softReservesBoxContent = text;
+    end)
+
+    -- Rolling SR extra rolls label
+    local RollingSRLabel = AceGUI:Create("Label");
+    RollingSRLabel:SetFontObject(_G.GameFontNormal);
+    RollingSRLabel:SetFullWidth(true);
+    RollingSRLabel:SetText("Rolling SR: Paste the Weekly Extra Rolls String below (optional):");
+    Window:AddChild(RollingSRLabel);
+
+    -- Rolling SR extra rolls input
+    local rollingExtraRollsContent = "";
+    local RollingSRBox = AceGUI:Create("MultiLineEditBox");
+    RollingSRBox:SetFullWidth(true);
+    RollingSRBox:DisableButton(true);
+    RollingSRBox:SetLabel("");
+    RollingSRBox:SetNumLines(4);
+    RollingSRBox:SetMaxLetters(999999999);
+    Window:AddChild(RollingSRBox);
+
+    RollingSRBox:SetCallback("OnTextChanged", function (_, _, text)
+        rollingExtraRollsContent = text;
     end)
 
     -- Status message frame
@@ -88,6 +109,15 @@ function Importer:draw()
     ImportButton:SetWidth(140);
     ImportButton:SetCallback("OnClick", function ()
         GL.SoftRes:import(softReservesBoxContent, true);
+
+        -- Parse Rolling SR extra rolls (independent of SoftRes success)
+        if (not GL:empty(rollingExtraRollsContent)) then
+            if (GL.RollingSR:parseImportString(rollingExtraRollsContent)) then
+                GL:success("Rolling SR extra rolls imported successfully");
+            else
+                GL:warning("Failed to parse Rolling SR extra rolls data");
+            end
+        end
     end);
     Window:AddChild(ImportButton);
 end

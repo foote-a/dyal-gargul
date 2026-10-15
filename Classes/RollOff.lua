@@ -242,22 +242,30 @@ function RollOff:postStartMessage(itemLink, time, note)
         return true;
     end
 
-    local announceMessage = (L.CHAT["You have %s seconds to roll on %s"]):format(
-        time,
-        itemLink
-    );
-    local eligiblePlayersMessage = false;
-    local Reserves = GL.SoftRes:playerReserveAmountsByItemLink(itemLink);
-    local TMBDetails = TMB:byItemLink(itemLink);
+    local isRollingSR = GL.RollingSR:tracksItem(itemLink);
+    local announceMessage;
 
-    if (type(note) == "string"
-        and not GL:empty(note)
-    ) then
-        announceMessage = (L.CHAT["You have %s seconds to roll on %s"] .. " - " .. note):format(
+    if (isRollingSR) then
+        announceMessage = ("Rolling SR Phase 1: Soft-reservists, /roll on %s!"):format(itemLink);
+        if (type(note) == "string" and not GL:empty(note)) then
+            announceMessage = announceMessage .. " - " .. note;
+        end
+    else
+        announceMessage = (L.CHAT["You have %s seconds to roll on %s"]):format(
             time,
             itemLink
         );
+        if (type(note) == "string" and not GL:empty(note)) then
+            announceMessage = (L.CHAT["You have %s seconds to roll on %s"] .. " - " .. note):format(
+                time,
+                itemLink
+            );
+        end
     end
+
+    local eligiblePlayersMessage = false;
+    local Reserves = GL.SoftRes:playerReserveAmountsByItemLink(itemLink);
+    local TMBDetails = TMB:byItemLink(itemLink);
 
     -- Check if this item was reserved, if so: mentioned the players who reserved it!
     if (GL.Settings:get("SoftRes.announceInfoWhenRolling")
@@ -371,6 +379,12 @@ end
 
 --- Anounce to everyone in the raid that a roll off has ended
 function RollOff:announceStop()
+    -- Phase 2 or tie-breaks run on the initiator's end, clients already stopped
+    if (GL.RollingSR:runsLocally() and self:startedByMe()) then
+        self:stop();
+        return;
+    end
+
     GL.CommMessage.new({
         action = CommActions.stopRollOff,
         channel = "GROUP",
@@ -493,6 +507,13 @@ function RollOff:start(CommMessage)
             self.inProgress = true;
             self.pendingStart = false;
             GL:cancelTimer("RollOff.startWatchdog");
+
+            if (GL.RollingSR:tracksItem(Details.name) or GL.RollingSR:tracksItem(Details.link)) then
+                GL.RollingSR:beginPhase1();
+            else
+                GL.RollingSR:resetPhase();
+            end
+
             self:listenForRolls();
 
             if (self:startedByMe()) then
@@ -515,41 +536,43 @@ function RollOff:start(CommMessage)
                 GL.RollerUI:showRollAcceptedNotification();
             end
 
-            -- Make sure the rolloff stops when time is up
-            self.StopRollOffTimer = GL.Ace:ScheduleTimer(function ()
-                self:stop();
-            end, time);
+            -- Make sure the rolloff stops when time is up (disabled for Rolling SR)
+            if (not GL.RollingSR:isPhase1()) then
+                self.StopRollOffTimer = GL.Ace:ScheduleTimer(function ()
+                    self:stop();
+                end, time);
 
-            -- Send a countdown in chat when enabled
-            local numberOfSecondsToCountdown = GL.Settings:get("MasterLooting.numberOfSecondsToCountdown", 5);
-            if (self:startedByMe() -- Only post a countdown if this user initiated the roll
-                and time - numberOfSecondsToCountdown > 2-- No point in counting down if there's hardly enough time anyways
-                and GL.Settings:get("MasterLooting.doCountdown")
-            ) then
-                local SecondsAnnounced = {};
+                -- Send a countdown in chat when enabled
+                local numberOfSecondsToCountdown = GL.Settings:get("MasterLooting.numberOfSecondsToCountdown", 5);
+                if (self:startedByMe() -- Only post a countdown if this user initiated the roll
+                    and time - numberOfSecondsToCountdown > 2-- No point in counting down if there's hardly enough time anyways
+                    and GL.Settings:get("MasterLooting.doCountdown")
+                ) then
+                    local SecondsAnnounced = {};
 
-                self.InitiateCountDownTimer = GL.Ace:ScheduleTimer(function ()
-                    self.CountDownTimer = GL.Ace:ScheduleRepeatingTimer(function ()
-                        GL:debug("Run RollOff.CountDownTimer");
+                    self.InitiateCountDownTimer = GL.Ace:ScheduleTimer(function ()
+                        self.CountDownTimer = GL.Ace:ScheduleRepeatingTimer(function ()
+                            GL:debug("Run RollOff.CountDownTimer");
 
-                        local secondsLeft = math.ceil(GL.Ace:TimeLeft(self.StopRollOffTimer));
-                        if (secondsLeft <= numberOfSecondsToCountdown
-                            and secondsLeft > 0
-                            and not SecondsAnnounced[secondsLeft]
-                        ) then
-                            SecondsAnnounced[secondsLeft] = true;
+                            local secondsLeft = math.ceil(GL.Ace:TimeLeft(self.StopRollOffTimer));
+                            if (secondsLeft <= numberOfSecondsToCountdown
+                                and secondsLeft > 0
+                                and not SecondsAnnounced[secondsLeft]
+                            ) then
+                                SecondsAnnounced[secondsLeft] = true;
 
-                            GL:sendChatMessage((L.CHAT["%s seconds to roll"]):format(secondsLeft), "GROUP");
+                                GL:sendChatMessage((L.CHAT["%s seconds to roll"]):format(secondsLeft), "GROUP");
 
-                            if (GL.Settings:get("MasterLooting.announceCountdownOnce")) then
-                                GL:debug("Cancel RollOff.CountDownTimer");
+                                if (GL.Settings:get("MasterLooting.announceCountdownOnce")) then
+                                    GL:debug("Cancel RollOff.CountDownTimer");
 
-                                GL.Ace:CancelTimer(self.CountDownTimer);
-                                self.CountDownTimer = nil;
+                                    GL.Ace:CancelTimer(self.CountDownTimer);
+                                    self.CountDownTimer = nil;
+                                end
                             end
-                        end
-                    end, .2);
-                end, time - numberOfSecondsToCountdown - 2);
+                        end, .2);
+                    end, time - numberOfSecondsToCountdown - 2);
+                end
             end
 
             local notifyOnItemOfInterest = GL.Settings:get("Rolling.notifyOnItemOfInterest");
@@ -790,6 +813,32 @@ function RollOff:stop(CommMessage)
         end
 
         return false;
+    end
+
+    -- Rolling SR: manage phase transitions and tie-breaks (ML only)
+    if (self:startedByMe() and GL.RollingSR:isActive()) then
+        if (GL.RollingSR:handleStop(self.CurrentRollOff)) then
+            -- Phase 2 or tie-break started, keep roll-off alive
+            if (self.InitiateCountDownTimer) then
+                GL.Ace:CancelTimer(self.InitiateCountDownTimer);
+                self.InitiateCountDownTimer = nil;
+            end
+
+            if (self.CountDownTimer) then
+                GL.Ace:CancelTimer(self.CountDownTimer);
+                self.CountDownTimer = nil;
+            end
+
+            if (self.StopRollOffTimer) then
+                GL.Ace:CancelTimer(self.StopRollOffTimer);
+                self.StopRollOffTimer = nil;
+            end
+
+            RollOff.inProgress = true;
+            self:listenForRolls();
+            GL.MasterLooterUI:updateWidgets();
+            return true;
+        end
     end
 
     -- If this user started the roll then we need to cancel some timers and post a message
@@ -1171,6 +1220,11 @@ function RollOff:processRoll(message)
     end
 
     if (not Roll) then
+        return;
+    end
+
+    -- Rolling SR: enforce per-phase roll limits
+    if (not GL.RollingSR:acceptRoll(Roll)) then
         return;
     end
 
