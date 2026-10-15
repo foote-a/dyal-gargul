@@ -244,12 +244,63 @@ Set the player's status in `Roster_And_Rolls` column B to `Alt`. They accumulate
 
 ---
 
+---
+
+## In-Game Solo Test Mode (No Google Sheet Needed!)
+
+You can test the entire system completely solo in-game in 30 seconds without opening Google Sheets:
+
+### 1. Enable Test Mode
+Type in chat:
+```
+/gl rsr test
+```
+This automatically sets up:
+- Mock Soft Reserves for **`[Deathbringer's Will]`** (Item ID: `50363`).
+- **You:** +2 bonus rolls (3 rolls total in Phase 2).
+- **Guildmate:** +1 bonus roll (2 rolls total in Phase 2).
+- **Pugman:** Dynamic Pug (Phase 1 only, no bonus rolls).
+
+### 2. Run a Simulated Roll-Off
+1. Start the roll-off:
+   ```
+   /gl ro 50363
+   ```
+2. Roll for yourself:
+   ```
+   /roll 1-100
+   ```
+3. Simulate other players' rolls:
+   ```
+   /gl rsr sim
+   ```
+   *(Or type `/gl rsr sim tie` to simulate a tie between Pugman and Guildmate at 95 to test tie-breaks!)*
+4. Watch the live counter in the Master Looter window:
+   `Phase 1: 3/3 reservists rolled`
+5. Click **`Stop Phase 1`**:
+   - If tied with a Pug: the button changes to **`End Tie-Break`**. Type `/gl rsr sim` and click **`End Tie-Break`**.
+   - If Guild member won Phase 1: advances automatically to Phase 2!
+6. In Phase 2:
+   - Roll your bonus rolls (`/roll 1-100`).
+   - Type `/gl rsr sim` to simulate Guildmate's bonus roll.
+   - Watch the counter reach `Phase 2: X/Y (All in!)`.
+7. Click **`Stop Phase 2`**.
+8. Select the winner and click **`Award`**:
+   - Notice the green confirmation message in chat:
+     `[Rolling SR] Deathbringer's Will awarded to <Winner>. Extra rolls reset to 0.`
+9. Reset when finished:
+   ```
+   /gl rsr clear
+   ```
+
+---
+
 ## Automated Test Suites
 
 The repository contains two automated test suites to verify functionality:
 
-### 1. Addon Unit Tests (16 Tests)
-Validates Phase 1 gating, tie-break rounds, Phase 2 bonus limits, Pug wins, item award resets, live counter calculations, slash commands, comms broadcast, Unicode UTF-8 quote normalization, and irregular whitespace parsing.
+### 1. Addon Unit Tests (17 Tests)
+Validates Phase 1 gating, tie-break rounds, Phase 2 bonus limits, Pug wins, item award resets, live counter calculations, solo test mode, slash commands, comms broadcast, Unicode UTF-8 quote normalization, and irregular whitespace parsing.
 ```powershell
 Scripts\bin\lua5.1.exe scratch\test_rolling_sr.lua
 ```

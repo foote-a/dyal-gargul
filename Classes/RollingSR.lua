@@ -681,6 +681,8 @@ function RollingSR:handleCommand(argumentString)
     if (arg == "") then
         GL:message(("[Rolling SR] Tracking bonus rolls for %d players."):format(self:countPlayers()));
         GL:message("Commands:");
+        GL:message("  /gl rsr test           - Enable solo test mode (loads sample data, no sheet needed!)");
+        GL:message("  /gl rsr sim [tie]      - Simulate other players' rolls during test roll-off");
         GL:message("  /gl rsr <string>       - Import extra rolls string");
         GL:message("  /gl rsr broadcast      - Broadcast data to raid group or guild");
         GL:message("  /gl rsr clear          - Clear all extra rolls data");
@@ -688,6 +690,21 @@ function RollingSR:handleCommand(argumentString)
     end
 
     local lowerArg = strlower(arg);
+
+    if (lowerArg == "test" or lowerArg == "demo") then
+        self:enableTestMode();
+        return;
+    end
+
+    if (lowerArg == "sim" or lowerArg == "simulate") then
+        self:simulateRolls(false);
+        return;
+    end
+
+    if (lowerArg == "sim tie" or lowerArg == "simulate tie") then
+        self:simulateRolls(true);
+        return;
+    end
 
     if (lowerArg == "broadcast" or lowerArg == "sync") then
         self:broadcast();
@@ -716,5 +733,97 @@ function RollingSR:handleCommand(argumentString)
         GL:success(("[Rolling SR] Successfully imported bonus rolls for %d players!"):format(self:countPlayers()));
     else
         GL:warning("[Rolling SR] Failed to import. Expected format: Player:Item=Rolls,Item=Rolls;");
+    end
+end
+
+--- Enable solo in-game test mode without needing to update Google Sheets
+---
+---@return nil
+function RollingSR:enableTestMode()
+    local playerName = GL.User and GL.User.name or "Tester";
+    if (playerName == "") then
+        playerName = UnitName and UnitName("player") or "Tester";
+    end
+
+    -- 1. Setup mock Soft Reserves in Gargul for Deathbringer's Will (50363)
+    local testItem = "Deathbringer's Will";
+    local testItemID = 50363;
+    local csvData = table.concat({
+        "Name,Class,ItemId,ItemName,Note,Plus",
+        ("%s,Warrior,%d,%s,,0"):format(playerName, testItemID, testItem),
+        ("Guildmate,Paladin,%d,%s,,0"):format(testItemID, testItem),
+        ("Pugman,Rogue,%d,%s,,0"):format(testItemID, testItem),
+    }, "\n");
+
+    if (GL.SoftRes and GL.SoftRes.importCSVData) then
+        GL.SoftRes:importCSVData(csvData, false);
+    end
+
+    -- 2. Setup mock Rolling SR bonus rolls (Player has +2, Guildmate has +1, Pugman has none/not listed)
+    local rsrString = ("%s:%s=2;Guildmate:%s=1;"):format(playerName, testItem, testItem);
+    self:parseImportString(rsrString);
+
+    GL:success("=================================================");
+    GL:success("[Rolling SR] TEST MODE ENABLED (No Sheet Needed!)");
+    GL:message(("Sample Soft Reserves loaded for [%s]:"):format(testItem));
+    GL:message(("  • %s (You): +2 bonus rolls (3 total in Phase 2)"):format(GL:capitalize(playerName)));
+    GL:message("  • Guildmate: +1 bonus roll (2 total in Phase 2)");
+    GL:message("  • Pugman: Pug (Phase 1 only, no bonus rolls)");
+    GL:message("How to test solo right now:");
+    GL:message(("  1. Type: /gl ro %d   (starts roll-off)"):format(testItemID));
+    GL:message("  2. Type: /roll 1-100");
+    GL:message("  3. Type: /gl rsr sim   (simulates rolls for Pugman & Guildmate)");
+    GL:message("     (or /gl rsr sim tie to test tie-break!)");
+    GL:message("  4. Watch live counter & click 'Stop Phase 1'!");
+    GL:message("  5. Type: /gl rsr clear (when finished)");
+    GL:success("=================================================");
+end
+
+--- Simulate rolls from other reservists during a test roll-off
+---
+---@param forceTie? boolean
+---@return nil
+function RollingSR:simulateRolls(forceTie)
+    if (not GL.RollOff or not GL.RollOff.inProgress) then
+        GL:warning("[Rolling SR Sim] No roll-off is currently in progress. Start one with /gl ro 50363");
+        return;
+    end
+
+    if (not self:isActive()) then
+        GL:warning("[Rolling SR Sim] Current item is not tracked by Rolling SR.");
+        return;
+    end
+
+    if (self.phase == PHASE_ONE) then
+        if (self.round == 0) then
+            if (forceTie) then
+                GL.RollOff:processRoll("Pugman rolls 95 (1-100)");
+                GL.RollOff:processRoll("Guildmate rolls 95 (1-100)");
+                GL:success("[Rolling SR Sim] Simulated Phase 1 tie: Pugman (95), Guildmate (95). Click 'Stop Phase 1' to test tie-break!");
+            else
+                GL.RollOff:processRoll("Pugman rolls 72 (1-100)");
+                GL.RollOff:processRoll("Guildmate rolls 85 (1-100)");
+                GL:success("[Rolling SR Sim] Simulated Phase 1 rolls: Pugman (72), Guildmate (85).");
+            end
+        else
+            -- In tie-break round
+            if (self.TiedPlayers and self.TiedPlayers["pugman"]) then
+                GL.RollOff:processRoll("Pugman rolls 68 (1-100)");
+            end
+            if (self.TiedPlayers and self.TiedPlayers["guildmate"]) then
+                GL.RollOff:processRoll("Guildmate rolls 89 (1-100)");
+            end
+            GL:success("[Rolling SR Sim] Simulated tie-break rolls!");
+        end
+    elseif (self.phase == PHASE_TWO) then
+        GL.RollOff:processRoll("Guildmate rolls 94 (1-100)");
+        GL:success("[Rolling SR Sim] Simulated bonus roll for Guildmate (94).");
+    end
+
+    if (GL.MasterLooterUI and GL.MasterLooterUI.updateWidgets) then
+        GL.MasterLooterUI:updateWidgets();
+    end
+    if (GL.RollOff and GL.RollOff.refreshRollsTable) then
+        GL.RollOff:refreshRollsTable();
     end
 end
