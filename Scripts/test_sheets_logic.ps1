@@ -82,5 +82,62 @@ foreach ($n in $raid2Attendees) { $mergedAttendees[$n] = $true }
 Assert-Equal $mergedAttendees.Count 4 "Concurrent raids 1 & 2 merged into unified attendance"
 Assert-Equal ($mergedAttendees.ContainsKey("Thrall") -and $mergedAttendees.ContainsKey("Sylvanas")) $true "Attendees from both raids present in union"
 
+# Helper function mimicking stripAccents in .NET
+function Strip-Accents([string]$str) {
+    $normalized = $str.Normalize([System.Text.NormalizationForm]::FormD)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($c in $normalized.ToCharArray()) {
+        $category = [System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($c)
+        if ($category -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) {
+            [void]$sb.Append($c)
+        }
+    }
+    return $sb.ToString()
+}
+
+# Rule 9: Automatic Accent / Diacritic Stripping
+$e_umlaut = [char]0x00EB
+$accentedName = "L${e_umlaut}golas"
+$cleanName = Strip-Accents $accentedName
+Assert-Equal $cleanName "Legolas" "Accent stripping converts Lëgolas -> Legolas"
+
+$e_acute = [char]0x00E9
+$accentedFrench = "R${e_acute}n${e_acute}gad${e_acute}"
+Assert-Equal (Strip-Accents $accentedFrench) "Renegade" "Accent stripping converts Rénégadé -> Renegade"
+
+# Rule 10: Alias mapping resolves alts/typos to canonical roster name
+$roster = @{ "Dyal" = "Member"; "Thrall" = "Member" }
+$aliases = @{ "Dyall" = "Dyal"; "Holydyal" = "Dyal" }
+$csvInputName = "Dyall"
+$resolvedName = if ($roster.ContainsKey($csvInputName)) {
+    $csvInputName
+} elseif ($aliases.ContainsKey($csvInputName)) {
+    $aliases[$csvInputName]
+} else {
+    $csvInputName
+}
+Assert-Equal $resolvedName "Dyal" "Alias table maps Dyall -> Dyal"
+
+# Rule 11: Combined Accent + Alias resolution
+$o_circumflex = [char]0x00F4
+$csvAccentAlias = "H${o_circumflex}lydyal"
+$cleanCsvName = Strip-Accents $csvAccentAlias
+$matchedTarget = $null
+foreach ($a in $aliases.Keys) {
+    if ((Strip-Accents $a).ToLower() -eq $cleanCsvName.ToLower()) {
+        $matchedTarget = $aliases[$a]
+        break
+    }
+}
+Assert-Equal $matchedTarget "Dyal" "Combined accent + alias resolves Hôlydyal -> Dyal"
+
+# Rule 12: Alias protects attendance (player is marked present, 0 misses accrued)
+$incomingReserves = @{ $resolvedName = @("Deathbringer's Will") }
+$memberAttended = $incomingReserves.ContainsKey("Dyal")
+$missesRecorded = if ($memberAttended) { 0 } else { 1 }
+Assert-Equal $memberAttended $true "Aliased alt counts as attendance for main player"
+Assert-Equal $missesRecorded 0 "Aliased player accrues 0 misses (streak protected)"
+
 Write-Host "`nSummary: $testsPassed / $testsTotal tests passed." -ForegroundColor $(if ($testsPassed -eq $testsTotal) { "Green" } else { "Red" })
 exit ($testsTotal - $testsPassed)
+

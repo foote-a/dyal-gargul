@@ -60,6 +60,172 @@ function normItem(raw) {
   return (raw || "").toString().trim().replace(/\s+/g, " ");
 }
 
+/**
+ * Strip diacritics and accents (e.g., "Lëgolas" -> "Legolas", "René" -> "Rene").
+ */
+function stripAccents(str) {
+  var s = (str || "").toString();
+  if (typeof s.normalize === "function") {
+    return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+  return s;
+}
+
+// ── Aliases & Name Resolution ───────────────────────────────────────────────────
+
+/**
+ * Read the Aliases sheet into a lookup map: { [normalizedAlias]: canonicalRosterName }.
+ */
+function readAliases(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Aliases");
+  var map = {};
+  if (!sheet) return map;
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return map;
+
+  for (var r = 1; r < data.length; r++) {
+    var rawAlias = data[r][0];
+    var rawTarget = data[r][1];
+    var alias = normName(rawAlias);
+    var target = normName(rawTarget);
+    if (alias && target) {
+      map[alias] = target;
+    }
+  }
+  return map;
+}
+
+/**
+ * Setup or create the Aliases tab with column headers.
+ */
+function setupAliasesTab() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Aliases");
+  if (!sheet) {
+    sheet = ss.insertSheet("Aliases");
+    sheet.getRange(1, 1, 1, 2).setValues([["Alias_Or_Alt_Name", "Roster_Character_Name"]]);
+    sheet.getRange(1, 1, 1, 2).setFontWeight("bold");
+    sheet.setColumnWidth(1, 220);
+    sheet.setColumnWidth(2, 220);
+    SpreadsheetApp.getUi().alert(
+      "Aliases Tab Created",
+      "Created 'Aliases' tab!\n\nAdd any alt character names, Discord usernames, or common typos in Column A, and map them to the official character name in Column B.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } else {
+    SpreadsheetApp.getUi().alert(
+      "Aliases Tab Exists",
+      "'Aliases' tab already exists.\n\nColumn A: Alias_Or_Alt_Name\nColumn B: Roster_Character_Name",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * Resolve a player name from SoftRes against the guild roster and aliases:
+ * 1. Direct match on Roster_And_Rolls (case-insensitive via normName).
+ * 2. Aliases lookup (alt character or Discord name -> official roster name).
+ * 3. Accent/diacritic-insensitive match against Roster and Aliases.
+ *
+ * @param {string} rawName
+ * @param {object} roster
+ * @param {object} aliasMap
+ * @return {{ resolvedName: string, isGuild: boolean, method: string }}
+ */
+function resolvePlayerName(rawName, roster, aliasMap) {
+  var name = normName(rawName);
+  if (!name) {
+    return { resolvedName: "", isGuild: false, method: "none" };
+  }
+
+  // 1. Direct match on Roster
+  if (roster[name]) {
+    return { resolvedName: name, isGuild: true, method: "exact" };
+  }
+
+  // 2. Direct match in Aliases table
+  if (aliasMap && aliasMap[name]) {
+    var target = aliasMap[name];
+    var inRoster = roster[target] !== undefined;
+    return { resolvedName: target, isGuild: inRoster, method: "alias" };
+  }
+
+  // 3. Accent-insensitive match against Roster
+  var cleanName = stripAccents(name).toLowerCase();
+  var rosterNames = Object.keys(roster);
+  for (var i = 0; i < rosterNames.length; i++) {
+    var rName = rosterNames[i];
+    if (stripAccents(rName).toLowerCase() === cleanName) {
+      return { resolvedName: rName, isGuild: true, method: "accent" };
+    }
+  }
+
+  // 4. Accent-insensitive match against Aliases
+  if (aliasMap) {
+    var aliasKeys = Object.keys(aliasMap);
+    for (var j = 0; j < aliasKeys.length; j++) {
+      var aKey = aliasKeys[j];
+      if (stripAccents(aKey).toLowerCase() === cleanName) {
+        var aTarget = aliasMap[aKey];
+        var aInRoster = roster[aTarget] !== undefined;
+        return { resolvedName: aTarget, isGuild: aInRoster, method: "alias_accent" };
+      }
+    }
+  }
+
+  // Unmatched (Pug or unrecognized typo)
+  return { resolvedName: name, isGuild: false, method: "none" };
+}
+
+/**
+ * Map all incoming SoftRes reservations to canonical roster members.
+ */
+function mapReservations(rawPlayers, roster, aliasMap) {
+  var guildReservations = {};
+  var pugsIgnored = [];
+  var substitutions = [];
+
+  Object.keys(rawPlayers).forEach(function (rawName) {
+    var data = rawPlayers[rawName];
+    var res = resolvePlayerName(rawName, roster, aliasMap);
+
+    if (res.isGuild) {
+      var canonical = res.resolvedName;
+      if (!guildReservations[canonical]) {
+        guildReservations[canonical] = {
+          items: [],
+          class: data.class || "",
+        };
+      }
+      data.items.forEach(function (it) {
+        guildReservations[canonical].items.push(it);
+      });
+
+      if (res.method !== "exact") {
+        substitutions.push({
+          original: rawName,
+          resolved: canonical,
+          method: res.method,
+          items: data.items,
+        });
+      }
+    } else {
+      pugsIgnored.push({
+        name: rawName,
+        items: data.items,
+      });
+    }
+  });
+
+  return {
+    guildReservations: guildReservations,
+    pugsIgnored: pugsIgnored,
+    substitutions: substitutions,
+  };
+}
+
 // ── CSV Parser ──────────────────────────────────────────────────────────────────
 
 /**
@@ -183,12 +349,104 @@ function appendPlayerRow(sheet, name, status, item1, rolls1, item2, rolls2, miss
 // ── Core logic ──────────────────────────────────────────────────────────────────
 
 /**
+ * Dry Run / Preview:
+ * Inspects SoftRes CSV imports against the roster WITHOUT modifying any data.
+ * Displays a summary dialog showing:
+ *   - Matched guild members & attendance
+ *   - Missing members who would accrue a miss (and who would reset)
+ *   - Aliases & accent adjustments applied
+ *   - Unmatched names (Pugs or typos to review)
+ */
+function previewWeeklySoftReserves() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rosterSheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!rosterSheet) throw new Error("Roster_And_Rolls tab not found.");
+
+  var rawPlayers = parseSoftresCSV();
+  var roster = readRoster(rosterSheet);
+  var aliasMap = readAliases(ss);
+
+  var mapping = mapReservations(rawPlayers, roster, aliasMap);
+  var guildRes = mapping.guildReservations;
+  var pugs = mapping.pugsIgnored;
+  var subs = mapping.substitutions;
+
+  var attendingCount = 0;
+  var missingMembers = [];
+  var willResetMembers = [];
+
+  Object.keys(roster).forEach(function (name) {
+    var prev = roster[name];
+    if (guildRes[name]) {
+      attendingCount++;
+    } else {
+      if (prev.status !== "Benched") {
+        missingMembers.push(name + " (misses: " + (prev.misses + 1) + ")");
+        if (prev.misses + 1 >= MISS_THRESHOLD && (prev.rolls1 > 0 || prev.rolls2 > 0)) {
+          var details = [];
+          if (prev.item1) details.push(prev.item1 + "=" + prev.rolls1);
+          if (prev.item2) details.push(prev.item2 + "=" + prev.rolls2);
+          willResetMembers.push(name + " [" + details.join(", ") + "]");
+        }
+      }
+    }
+  });
+
+  var lines = [];
+  lines.push("=== DRY RUN / PREVIEW REPORT ===");
+  lines.push("");
+  lines.push("✓ Guild Members Present: " + attendingCount + " / " + Object.keys(roster).length);
+
+  if (subs.length > 0) {
+    lines.push("");
+    lines.push("🔄 Resolved Aliases / Accents (" + subs.length + "):");
+    subs.forEach(function (s) {
+      lines.push("  • " + s.original + " → " + s.resolved + " (" + s.method + ")");
+    });
+  }
+
+  if (pugs.length > 0) {
+    lines.push("");
+    lines.push("⚠️ Unmatched Names (Pugs or typos) (" + pugs.length + "):");
+    pugs.forEach(function (p) {
+      lines.push("  • " + p.name + (p.items.length > 0 ? " [SR: " + p.items.join(", ") + "]" : ""));
+    });
+    lines.push("  (If any of these are guild members, add them to the 'Aliases' tab before committing!)");
+  } else {
+    lines.push("");
+    lines.push("ℹ️ No unmatched / pug names found.");
+  }
+
+  if (missingMembers.length > 0) {
+    lines.push("");
+    lines.push("❌ Absent Guild Members (" + missingMembers.length + "):");
+    lines.push("  " + missingMembers.join(", "));
+  }
+
+  if (willResetMembers.length > 0) {
+    lines.push("");
+    lines.push("🚨 Extra Rolls RESETTING this week due to 2 consecutive misses:");
+    willResetMembers.forEach(function (m) {
+      lines.push("  • " + m);
+    });
+  }
+
+  lines.push("");
+  lines.push("NOTE: No changes have been saved to your spreadsheet.");
+
+  var ui = SpreadsheetApp.getUi();
+  ui.alert("Rolling SR — Preview & Review", lines.join("\n"), ui.ButtonSet.OK);
+}
+
+/**
  * Main entry point. Call from the Apps Script editor or attach to a menu/button.
  *
  * Steps:
  *   1. Parse CSV_Import.
- *   2. Update Roster_And_Rolls (increment / reset extra rolls, track misses).
- *   3. Write the Gargul addon string to Addon_Export!A1.
+ *   2. Map names via Aliases & accent stripping.
+ *   3. If unmatched names found, prompt officer for review.
+ *   4. Update Roster_And_Rolls (increment / reset extra rolls, track misses).
+ *   5. Write the Gargul addon string to Addon_Export!A1.
  */
 function processWeeklySoftReserves() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -198,18 +456,37 @@ function processWeeklySoftReserves() {
   var today = todayStamp();
 
   // ── 1. Parse this week's reserves ──
-  var thisWeek = parseSoftresCSV(); // { playerName: { items:[], class } }
-
-  // ── 2. Load existing roster ──
+  var rawPlayers = parseSoftresCSV(); // { rawPlayerName: { items:[], class } }
+  var aliasMap = readAliases(ss);
   var roster = readRoster(rosterSheet);
 
-  // ── 3. Find Pugs (names in CSV that are NOT on the guild roster) ──
-  var pugsIgnored = [];
-  Object.keys(thisWeek).forEach(function (name) {
-    if (!roster[name]) {
-      pugsIgnored.push(name);
+  // ── 2. Map reservations to canonical roster members ──
+  var mapping = mapReservations(rawPlayers, roster, aliasMap);
+  var thisWeek = mapping.guildReservations;
+  var pugsIgnored = mapping.pugsIgnored.map(function (p) { return p.name; });
+  var substitutions = mapping.substitutions;
+
+  // ── 3. Prompt if unmatched names detected (Option 3 protection) ──
+  if (pugsIgnored.length > 0) {
+    try {
+      var ui = SpreadsheetApp.getUi();
+      var previewPugs = pugsIgnored.slice(0, 10).join(", ") + (pugsIgnored.length > 10 ? "..." : "");
+      var resp = ui.alert(
+        "Unmatched Names Found (" + pugsIgnored.length + ")",
+        "The following SoftRes name(s) are NOT on your guild roster or aliases tab:\n\n" +
+          previewPugs +
+          "\n\n• Click YES if these are external Pugs and you want to commit.\n" +
+          "• Click NO to cancel so you can add any guild typos to the 'Aliases' tab first.",
+        ui.ButtonSet.YES_NO
+      );
+      if (resp !== ui.Button.YES) {
+        ss.toast("Update cancelled by user.", "Rolling SR", 5);
+        return;
+      }
+    } catch (e) {
+      // Running headless or non-interactively — proceed
     }
-  });
+  }
 
   // ── 4. Process ONLY players on the guild roster ──
   Object.keys(roster).forEach(function (name) {
@@ -226,7 +503,7 @@ function processWeeklySoftReserves() {
 
     // ── Attendance / miss tracking ──
     if (curr) {
-      // Player participated this week (present in CSV).
+      // Player participated this week (present in CSV or mapped via alias).
       var misses = 0; // reset consecutive misses on attendance
       var lastRaid = today;
 
@@ -266,8 +543,11 @@ function processWeeklySoftReserves() {
 
   // ── 6. Toast summary ──
   var msg = "Updated " + Object.keys(roster).length + " guild members.";
+  if (substitutions.length > 0) {
+    msg += " (" + substitutions.length + " alias/accent matches).";
+  }
   if (pugsIgnored.length > 0) {
-    msg += " Ignored " + pugsIgnored.length + " pug(s): " + pugsIgnored.join(", ");
+    msg += " Ignored " + pugsIgnored.length + " pug(s).";
   }
   ss.toast(msg, "Rolling SR", 10);
 }
@@ -415,7 +695,10 @@ function isRecruitInTrial(entry) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Rolling SR")
-    .addItem("Process Weekly SRs", "processWeeklySoftReserves")
-    .addItem("Refresh Addon Export", "writeAddonExport")
+    .addItem("🔍 Preview & Review (Dry Run)", "previewWeeklySoftReserves")
+    .addItem("⚡ Process Weekly SRs (Commit)", "processWeeklySoftReserves")
+    .addSeparator()
+    .addItem("📋 Setup Aliases Tab", "setupAliasesTab")
+    .addItem("🔄 Refresh Addon Export", "writeAddonExport")
     .addToUi();
 }

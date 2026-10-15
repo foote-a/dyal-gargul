@@ -54,7 +54,14 @@ Create Row 1 with these 8 column headers:
 - **Do NOT list Pugs here.** The script skips unlisted players and reports them via a toast popup.
 
 #### C. `Addon_Export`
-Create an empty tab named `Addon_Export`. Cell **A1** is where the generated import string for Gargul will be written.
+Create an empty tab named `Addon_Export`. Cell **A1** is where the generated import string for Gargul will be written (leave this cell empty; do not put a formula here).
+
+#### D. `Aliases` (Optional but Recommended)
+Click **Rolling SR → 📋 Setup Aliases Tab** (or create a tab named `Aliases`):
+- Column A: **`Alias_Or_Alt_Name`** (alt character name, Discord username, or common typo)
+- Column B: **`Roster_Character_Name`** (the official character name in `Roster_And_Rolls`)
+- *Why use this:* If a member signs into SoftRes under an alt or nickname, this maps them back to their primary roster character so they don't accrue an accidental absence.
+- *Accent Normalization:* Accented characters (`é`, `ö`, `ë`) are automatically matched to unaccented SoftRes entries without needing manual alias rows.
 
 ---
 
@@ -62,7 +69,11 @@ Create an empty tab named `Addon_Export`. Cell **A1** is where the generated imp
 1. In Google Sheets, open **Extensions → Apps Script**.
 2. Replace any placeholder code with the contents of [`Scripts/RollingSR_Code.gs`](Scripts/RollingSR_Code.gs).
 3. Save the script project (`Ctrl + S`).
-4. Reload the Google Sheet. A new menu named **Rolling SR** will appear in the top toolbar.
+4. Reload the Google Sheet. A new menu named **Rolling SR** will appear in the top toolbar with:
+   - **`🔍 Preview & Review (Dry Run)`** — Check attendance and view any unmatched names/typos safely without modifying data.
+   - **`⚡ Process Weekly SRs (Commit)`** — Commit weekly attendance and update extra rolls.
+   - **`📋 Setup Aliases Tab`** — Automatically generate the `Aliases` tab.
+   - **`🔄 Refresh Addon Export`** — Rebuild `Addon_Export!A1`.
 
 ---
 
@@ -159,10 +170,14 @@ Hovering over any item in bags or loot windows automatically lists reservists al
 ### Step 4: Post-Raid Sheet Processing
 1. When all raids conclude, export the softres.it CSVs.
 2. Paste them into `CSV_Raid1`, `CSV_Raid2`, etc. (or stack them in `CSV_Import`).
-3. In the top menu, select **Rolling SR → Process Weekly SRs**.
-4. The script:
-   - Merges all raid attendances.
-   - Skips all Pugs and shows a toast notification summary.
+3. *(Optional but Recommended)* Select **Rolling SR → 🔍 Preview & Review (Dry Run)**:
+   - Verifies which guild members attended, lists absent members, and flags any unmatched names.
+   - If an unmatched name is actually a guild member's alt or typo, add it to the **`Aliases`** tab.
+4. Select **Rolling SR → ⚡ Process Weekly SRs (Commit)**:
+   - If unmatched names exist, a confirmation dialog lists them to ensure no guild members are accidentally skipped.
+   - The script merges all raid attendances across tabs.
+   - Resolves alts and typos via the `Aliases` tab and automatically normalizes accented characters.
+   - Skips all external Pugs.
    - Increments rolls (+1) for repeating reserved items.
    - Resets rolls (to 0) for changed/dropped items.
    - Enforces the 1-miss grace period and 2-consecutive-miss roll reset.
