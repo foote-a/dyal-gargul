@@ -488,7 +488,10 @@ function processWeeklySoftReserves() {
     }
   }
 
-  // ── 4. Process ONLY players on the guild roster ──
+  // ── 4. Create automatic pre-update backup snapshot ──
+  createRosterSnapshot(true);
+
+  // ── 5. Process ONLY players on the guild roster ──
   Object.keys(roster).forEach(function (name) {
     var prev = roster[name];
     var curr = thisWeek[name] || null;
@@ -600,12 +603,313 @@ function markItemWon(playerName, itemName) {
   var entry = roster[name];
   if (!entry) return;
 
-  if (entry.item1 === item) {
+  var targetLower = item.toLowerCase();
+  if (entry.item1 && entry.item1.toLowerCase() === targetLower) {
     sheet.getRange(entry.row, COL.ITEM1 + 1, 1, 2).setValues([["", 0]]);
   }
-  if (entry.item2 === item) {
+  if (entry.item2 && entry.item2.toLowerCase() === targetLower) {
     sheet.getRange(entry.row, COL.ITEM2 + 1, 1, 2).setValues([["", 0]]);
   }
+}
+
+/**
+ * Interactive dialog to mark an item won by a player and reset their extra rolls.
+ */
+function markItemWonDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  var roster = readRoster(sheet);
+  var aliasMap = readAliases(ss);
+
+  var resp = ui.prompt(
+    "🏆 Mark Item Won",
+    "Enter the character name who won an item:",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var rawName = resp.getResponseText().trim();
+  if (!rawName) return;
+
+  var res = resolvePlayerName(rawName, roster, aliasMap);
+  var canonical = res.resolvedName;
+  var entry = roster[canonical];
+
+  if (!entry) {
+    ui.alert("Player Not Found", "Could not find '" + rawName + "' on Roster_And_Rolls.", ui.ButtonSet.OK);
+    return;
+  }
+
+  var options = [];
+  if (entry.item1) options.push("1: " + entry.item1 + " (" + entry.rolls1 + " extra rolls)");
+  if (entry.item2) options.push("2: " + entry.item2 + " (" + entry.rolls2 + " extra rolls)");
+
+  if (options.length === 0) {
+    ui.alert("No Items", canonical + " currently has no active reserved items on the roster.", ui.ButtonSet.OK);
+    return;
+  }
+
+  var itemToReset = "";
+  if (options.length === 1) {
+    itemToReset = entry.item1 || entry.item2;
+    var confirm = ui.alert(
+      "Confirm Item Won",
+      "Mark '" + itemToReset + "' as won by " + canonical + "?\n\nExtra rolls on this item will reset to 0.",
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) return;
+  } else {
+    var itemResp = ui.prompt(
+      "Select Item Won",
+      canonical + " has 2 reserved items:\n\n" +
+        options.join("\n") +
+        "\n\nEnter 1 for Slot 1, 2 for Slot 2, or type the item name:",
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (itemResp.getSelectedButton() !== ui.Button.OK) return;
+    var val = itemResp.getResponseText().trim();
+    if (val === "1") {
+      itemToReset = entry.item1;
+    } else if (val === "2") {
+      itemToReset = entry.item2;
+    } else {
+      itemToReset = normItem(val);
+    }
+  }
+
+  markItemWon(canonical, itemToReset);
+  writeAddonExport(ss);
+
+  ui.alert("Item Won Recorded", "Reset extra rolls for '" + itemToReset + "' on " + canonical + " to 0.\n\nAddon export refreshed.", ui.ButtonSet.OK);
+}
+
+// ── Officer Tools ───────────────────────────────────────────────────────────────
+
+/**
+ * Excuse an absence (vacation, prior notice) for a player to protect their streak.
+ */
+function excuseAbsenceDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  var roster = readRoster(sheet);
+  var aliasMap = readAliases(ss);
+
+  var resp = ui.prompt(
+    "🌴 Excuse Absence / Vacation",
+    "Enter the character name whose absence is excused:",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var rawName = resp.getResponseText().trim();
+  if (!rawName) return;
+
+  var res = resolvePlayerName(rawName, roster, aliasMap);
+  var canonical = res.resolvedName;
+  var entry = roster[canonical];
+
+  if (!entry) {
+    ui.alert("Player Not Found", "Could not find '" + rawName + "' on Roster_And_Rolls.", ui.ButtonSet.OK);
+    return;
+  }
+
+  // Reset misses to 0
+  sheet.getRange(entry.row, COL.MISSES + 1, 1, 1).setValue(0);
+  ss.toast("Absence excused for " + canonical + ". Consecutive misses reset to 0.", "Rolling SR", 5);
+}
+
+/**
+ * Scan for recruits who have passed the trial duration and offer 1-click promotion to Member.
+ */
+function checkRecruitGraduation() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  var roster = readRoster(sheet);
+
+  var eligible = [];
+  Object.keys(roster).forEach(function (name) {
+    var entry = roster[name];
+    if (entry.status === "Recruit" && !isRecruitInTrial(entry)) {
+      eligible.push({ name: name, row: entry.row, lastRaid: entry.lastRaid });
+    }
+  });
+
+  if (eligible.length === 0) {
+    ui.alert("Recruits Up to Date", "No recruits are currently eligible for graduation (trial period is " + RECRUIT_TRIAL_WEEKS + " weeks).", ui.ButtonSet.OK);
+    return;
+  }
+
+  var namesList = eligible.map(function (e) { return "• " + e.name + " (first recorded raid: " + e.lastRaid + ")"; }).join("\n");
+  var resp = ui.alert(
+    "🎓 Graduate Recruits (" + eligible.length + ")",
+    "The following recruit(s) have completed their " + RECRUIT_TRIAL_WEEKS + "-week trial:\n\n" +
+      namesList +
+      "\n\nWould you like to promote them to 'Member' now?\n(This enables their extra rolls in the in-game addon export).",
+    ui.ButtonSet.YES_NO
+  );
+
+  if (resp === ui.Button.YES) {
+    eligible.forEach(function (e) {
+      sheet.getRange(e.row, COL.STATUS + 1, 1, 1).setValue("Member");
+    });
+    writeAddonExport(ss);
+    ui.alert("Graduation Complete", "Successfully promoted " + eligible.length + " recruit(s) to Member and updated Addon Export!", ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Create a timestamped backup snapshot of Roster_And_Rolls.
+ * @param {boolean} [silent=false]
+ */
+function createRosterSnapshot(silent) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rosterSheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!rosterSheet) throw new Error("Roster_And_Rolls tab not found.");
+
+  var today = todayStamp();
+  var baseName = "Archive_" + today;
+  var sheetName = baseName;
+  var counter = 1;
+  while (ss.getSheetByName(sheetName)) {
+    counter++;
+    sheetName = baseName + "_" + counter;
+  }
+
+  var newSheet = rosterSheet.copyTo(ss);
+  newSheet.setName(sheetName);
+
+  if (!silent) {
+    SpreadsheetApp.getUi().alert(
+      "Backup Created",
+      "Created backup snapshot tab: '" + sheetName + "'.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } else {
+    ss.toast("Auto-backup created: " + sheetName, "Rolling SR", 3);
+  }
+}
+
+/**
+ * Display a summary dashboard of active streaks, at-risk members, and status counts.
+ */
+function showLeaderboardAndStats() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  var roster = readRoster(sheet);
+
+  var streaks = [];
+  var atRisk = [];
+  var statusCounts = { Member: 0, Recruit: 0, Alt: 0, Benched: 0, Other: 0 };
+
+  Object.keys(roster).forEach(function (name) {
+    var e = roster[name];
+    var stat = e.status || "Member";
+    if (statusCounts[stat] !== undefined) {
+      statusCounts[stat]++;
+    } else {
+      statusCounts.Other++;
+    }
+
+    if (e.rolls1 > 0 && e.item1) {
+      streaks.push({ player: name, item: e.item1, rolls: e.rolls1 });
+    }
+    if (e.rolls2 > 0 && e.item2) {
+      streaks.push({ player: name, item: e.item2, rolls: e.rolls2 });
+    }
+
+    if (e.misses === 1 && (e.rolls1 > 0 || e.rolls2 > 0)) {
+      var details = [];
+      if (e.item1 && e.rolls1 > 0) details.push(e.item1 + " (+" + e.rolls1 + ")");
+      if (e.item2 && e.rolls2 > 0) details.push(e.item2 + " (+" + e.rolls2 + ")");
+      atRisk.push("• " + name + ": " + details.join(", "));
+    }
+  });
+
+  streaks.sort(function (a, b) { return b.rolls - a.rolls; });
+
+  var lines = [];
+  lines.push("=== ROLLING SR DASHBOARD ===");
+  lines.push("");
+  lines.push("👥 Roster Breakdown:");
+  lines.push("  Members: " + statusCounts.Member + " | Recruits: " + statusCounts.Recruit + " | Alts: " + statusCounts.Alt + " | Benched: " + statusCounts.Benched);
+
+  lines.push("");
+  lines.push("🔥 Top Active Roll Streaks:");
+  if (streaks.length > 0) {
+    streaks.slice(0, 5).forEach(function (s, idx) {
+      lines.push("  " + (idx + 1) + ". " + s.player + " — " + s.item + " (+" + s.rolls + " bonus rolls)");
+    });
+  } else {
+    lines.push("  (No extra rolls accumulated yet)");
+  }
+
+  lines.push("");
+  lines.push("⚠️ At-Risk Streaks (1 Miss — Will Reset if Absent Next Raid):");
+  if (atRisk.length > 0) {
+    atRisk.slice(0, 8).forEach(function (m) {
+      lines.push("  " + m);
+    });
+  } else {
+    lines.push("  ✓ No raiders currently at risk of streak resets.");
+  }
+
+  ui.alert("Rolling SR — Analytics & Streaks", lines.join("\n"), ui.ButtonSet.OK);
+}
+
+/**
+ * Sanitize, clean whitespace, Title Case player names, and sort roster alphabetically.
+ */
+function formatAndCleanRoster() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!sheet) throw new Error("Roster_And_Rolls tab not found.");
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    ui.alert("Empty Roster", "Roster_And_Rolls has no member rows to clean.", ui.ButtonSet.OK);
+    return;
+  }
+
+  var header = data[0];
+  var rows = [];
+
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    var rawName = row[COL.PLAYER];
+    if (!rawName || !rawName.toString().trim()) continue;
+
+    var name = normName(rawName);
+    var status = (row[COL.STATUS] || "Member").toString().trim();
+    var item1 = normItem(row[COL.ITEM1]);
+    var rolls1 = parseInt(row[COL.ROLLS1], 10) || 0;
+    var item2 = normItem(row[COL.ITEM2]);
+    var rolls2 = parseInt(row[COL.ROLLS2], 10) || 0;
+    var misses = parseInt(row[COL.MISSES], 10) || 0;
+    var lastRaid = (row[COL.LAST_RAID] || "").toString().trim();
+
+    rows.push([name, status, item1, rolls1, item2, rolls2, misses, lastRaid]);
+  }
+
+  // Sort alphabetically by player name
+  rows.sort(function (a, b) {
+    return a[0].localeCompare(b[0]);
+  });
+
+  // Clear existing content and rewrite
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, ROSTER_COLS).setValues([header]);
+  sheet.getRange(1, 1, 1, ROSTER_COLS).setFontWeight("bold");
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, ROSTER_COLS).setValues(rows);
+  }
+
+  ui.alert("Roster Cleaned", "Cleaned, sanitized, and sorted " + rows.length + " player rows alphabetically.", ui.ButtonSet.OK);
 }
 
 // ── Addon export ────────────────────────────────────────────────────────────────
@@ -698,6 +1002,13 @@ function onOpen() {
     .addItem("🔍 Preview & Review (Dry Run)", "previewWeeklySoftReserves")
     .addItem("⚡ Process Weekly SRs (Commit)", "processWeeklySoftReserves")
     .addSeparator()
+    .addItem("🏆 Mark Item Won", "markItemWonDialog")
+    .addItem("🌴 Excuse Absence / Vacation", "excuseAbsenceDialog")
+    .addItem("🎓 Check Recruit Graduation", "checkRecruitGraduation")
+    .addItem("📊 Streak Leaderboard & Stats", "showLeaderboardAndStats")
+    .addSeparator()
+    .addItem("📦 Create Backup Snapshot", "createRosterSnapshot")
+    .addItem("🧹 Clean & Sort Roster", "formatAndCleanRoster")
     .addItem("📋 Setup Aliases Tab", "setupAliasesTab")
     .addItem("🔄 Refresh Addon Export", "writeAddonExport")
     .addToUi();

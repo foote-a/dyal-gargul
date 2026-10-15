@@ -70,10 +70,16 @@ Click **Rolling SR → 📋 Setup Aliases Tab** (or create a tab named `Aliases`
 2. Replace any placeholder code with the contents of [`Scripts/RollingSR_Code.gs`](Scripts/RollingSR_Code.gs).
 3. Save the script project (`Ctrl + S`).
 4. Reload the Google Sheet. A new menu named **Rolling SR** will appear in the top toolbar with:
-   - **`🔍 Preview & Review (Dry Run)`** — Check attendance and view any unmatched names/typos safely without modifying data.
-   - **`⚡ Process Weekly SRs (Commit)`** — Commit weekly attendance and update extra rolls.
-   - **`📋 Setup Aliases Tab`** — Automatically generate the `Aliases` tab.
-   - **`🔄 Refresh Addon Export`** — Rebuild `Addon_Export!A1`.
+   - **`🔍 Preview & Review (Dry Run)`** — Check attendance and view unmatched names/typos safely without modifying data.
+   - **`⚡ Process Weekly SRs (Commit)`** — Auto-creates a backup snapshot, commits attendance, calculates rolls, and updates `Addon_Export!A1`.
+   - **`🏆 Mark Item Won`** — Interactive prompt to select a player and reset their extra rolls on a won item to 0.
+   - **`🌴 Excuse Absence / Vacation`** — Protects a raider's streak by resetting consecutive misses to 0 when they post prior notice.
+   - **`🎓 Check Recruit Graduation`** — Scans recruits and offers 1-click promotion to `Member` for anyone who completed their 2-week trial.
+   - **`📊 Streak Leaderboard & Stats`** — Displays active streak leaders, at-risk streaks (1 miss), and roster breakdown.
+   - **`📦 Create Backup Snapshot`** — Creates an instant timestamped `Archive_YYYY-MM-DD` backup tab of `Roster_And_Rolls`.
+   - **`🧹 Clean & Sort Roster`** — Strips whitespace, standardizes Title Case, and sorts roster alphabetically.
+   - **`📋 Setup Aliases Tab`** — Automatically creates and formats the `Aliases` tab.
+   - **`🔄 Refresh Addon Export`** — Manually rebuilds `Addon_Export!A1`.
 
 ---
 
