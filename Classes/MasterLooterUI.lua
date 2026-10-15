@@ -320,6 +320,13 @@ function MasterLooterUI:draw(itemLink)
             end);
             FirstRow:AddChild(PlusOneButton);
 
+            local RSRStatusLabel = AceGUI:Create("Label");
+            RSRStatusLabel:SetText("");
+            RSRStatusLabel:SetWidth(160);
+            RSRStatusLabel:SetHeight(20);
+            FirstRow:AddChild(RSRStatusLabel);
+            GL.Interface:set(self, "Label.RSRStatus", RSRStatusLabel);
+
         --[[
             SECOND ROW
         ]]
@@ -1361,5 +1368,37 @@ function MasterLooterUI:updateWidgets()
         GL.Interface:get(self, "Button.Disenchant"):SetDisabled(true);
         GL.Interface:get(self, "Button.Clear"):SetDisabled(true);
         GL.Interface:get(self, "EditBox.Item"):SetDisabled(true);
+    end
+
+    local StopButton = GL.Interface:get(self, "Button.Stop");
+    local RSRStatus = GL.Interface:get(self, "Label.RSRStatus");
+
+    if (GL.RollOff.inProgress and GL.RollingSR and GL.RollingSR:isActive()) then
+        if (GL.RollingSR:isPhase1()) then
+            if (GL.RollingSR.round > 0) then
+                StopButton:SetText(L["End Tie-Break"]);
+                StopButton:SetWidth(105);
+            else
+                StopButton:SetText(L["Stop Phase 1"]);
+                StopButton:SetWidth(95);
+            end
+        elseif (GL.RollingSR:isPhase2()) then
+            StopButton:SetText(L["Stop Phase 2"]);
+            StopButton:SetWidth(95);
+        end
+
+        if (RSRStatus) then
+            local item = GL.RollOff.CurrentRollOff.itemLink or GL.RollOff.CurrentRollOff.itemName;
+            RSRStatus:SetText(GL.RollingSR:getStatusText(item));
+        end
+    else
+        if (StopButton) then
+            StopButton:SetText(L["Stop"]);
+            StopButton:SetWidth(60);
+        end
+
+        if (RSRStatus) then
+            RSRStatus:SetText("");
+        end
     end
 end

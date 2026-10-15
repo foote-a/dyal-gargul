@@ -108,35 +108,51 @@ The system seamlessly supports up to 4 raids running at the exact same time:
 ---
 
 ### Step 2: Addon Setup (In-Game MLs)
-Before the raid begins:
-1. Ensure `dyal-gargul` is in `World of Warcraft/_classic_/Interface/AddOns/Gargul`.
-2. Open Gargul's SoftRes window (`/gl sr`).
-3. Import your raid's softres.it data so Gargul knows all reservists (Guild + Pugs).
-4. Copy cell **`Addon_Export!A1`** from the Google Sheet and paste it into the **Rolling SR (Weekly Extra Rolls)** field in the SoftRes window.
-5. Click **Import**. (Data persists across `/reload` and logouts in `GargulDB`).
+Before the raid begins, Master Looters can import the data in **one of three fast ways**:
+
+- **Method A — Slash Command (Fastest):**  
+  Type or paste directly in chat:  
+  `/gl rsr <paste export string here>`
+- **Method B — Addon Comms Sync (No Google Sheets needed for other MLs!):**  
+  One officer imports the string, then types:  
+  `/gl rsr broadcast` (or `/gl rsr broadcast guild`)  
+  All other Master Looters running Gargul in the raid or guild will automatically receive and sync the data!
+- **Method C — SoftRes Window:**  
+  Open Gargul's SoftRes window (`/gl sr`), paste into the **Rolling SR (Weekly Extra Rolls)** field, and click **Import**.
+
+*(Note: Data persists across `/reload` and logouts in `GargulDB`).*
 
 ---
 
-### Step 3: During the Raid (Roll-Off Rules)
+### Step 3: During the Raid (Roll-Off Rules & ML Interface)
 
 When an item reserved under Rolling SR drops:
 
+#### Tooltip Inspection
+Hovering over any item in bags or loot windows automatically lists reservists along with their bonus rolls:
+> `Arthas (+2 bonus)`  
+> `Thrall (+0)`  
+> `PugWarrior (Pug)`
+
 #### Phase 1: All Reservists (Guild & Pugs)
 1. Gargul announces Phase 1 to Raid Warning/Raid Chat: all reservists roll once (`/roll 1-100`).
-2. **No Timers:** Gargul does not start a countdown. The ML clicks **Stop** when all reservists have rolled.
-3. Resolution:
+2. **Live Counter in ML Window:** The ML window displays:  
+   `Phase 1: X/Y reservists rolled` in real-time as rolls arrive.
+3. **Dynamic Button:** The stop button dynamically changes label to **`Stop Phase 1`**.
+4. The ML clicks **`Stop Phase 1`** when all reservists have rolled:
    - **Pug Wins Outright:** The Pug has the highest roll. Gargul announces the Pug as the winner. The roll-off finishes immediately (no Phase 2).
-   - **Tie-Break Round:** If there is a tie for top roll (involving a Pug or Guild members), Gargul initiates an automatic tie-break round. Only tied players can roll. The ML clicks **Stop** once tied players have rolled.
+   - **Tie-Break Round:** If there is a tie for top roll (involving a Pug or Guild members), Gargul initiates a tie-break round. The button changes to **`End Tie-Break`** and status shows `Tie-Break: X/Y rolled`. The ML clicks **`End Tie-Break`** once tied rolls are complete.
    - **Guild Member Wins:** Gargul advances automatically to **Phase 2**.
 
 #### Phase 2: Guild Members Only
 1. Gargul announces Phase 2 and lists each eligible guild member's total allowed rolls (`1 + ExtraRolls`).
-2. Eligible guild members cast their bonus `/roll 1-100` rolls.
-   - Gargul accepts up to `1 + ExtraRolls` per player and automatically ignores excess rolls.
-   - Pugs and non-reservists cannot roll in Phase 2.
-3. **No Timers:** The ML clicks **Stop** when bonus rolls are in.
-4. Gargul evaluates all valid rolls across Phase 1 and Phase 2 and announces the final winner.
-5. **Auto-Reset:** Upon awarding the item via Gargul, the winning player's extra rolls on that item automatically reset to `0` in the addon.
+2. **Live Counter in ML Window:** The status updates live to show bonus rolls cast:  
+   `Phase 2: X/Y rolls` (and displays `(All in!)` when every eligible bonus roll has been cast).
+3. **Dynamic Button:** The stop button dynamically changes to **`Stop Phase 2`**.
+4. The ML clicks **`Stop Phase 2`** when bonus rolls are in.
+5. Gargul evaluates all valid rolls across Phase 1 and Phase 2 and announces the final winner.
+6. **Award Confirmation:** When the ML awards the item via Gargul, Gargul resets the player's rolls on that item to `0` and prints an immediate confirmation in chat:  
+   `[Rolling SR] Betrayer of Humanity awarded to Arthas. Extra rolls reset to 0.`
 
 ---
 
@@ -172,13 +188,74 @@ When an item reserved under Rolling SR drops:
 
 ---
 
-## FAQ & Edge Cases
+## Raid Night Quick Reference Checklist
+
+### 15 Minutes Before Raid
+- [ ] **Officers:** Check if anyone is benched; set their status to `Benched` in column B of `Roster_And_Rolls`.
+- [ ] **One Officer:** Copy `Addon_Export!A1` and run `/gl rsr <string>` in WoW.
+- [ ] **Broadcast:** Run `/gl rsr broadcast guild` (or `/gl rsr broadcast` in raid) so all other Master Looters sync instantly.
+- [ ] **Verify:** Type `/gl rsr` to confirm loaded player count.
+
+### During the Raid (When an Item Drops)
+1. **Start Roll-Off:** Alt-Click the item or click Start in Gargul.
+2. **Phase 1:** Watch the live counter: `Phase 1: X/Y reservists rolled`.
+3. **Stop Phase 1:** Click **`Stop Phase 1`** once all initial rolls are in.
+   - *If Pug wins:* Done! Award item.
+   - *If Tie:* Click **`End Tie-Break`** once tied players re-roll.
+   - *If Guild member wins:* Advances automatically to Phase 2.
+4. **Phase 2:** Watch the bonus counter: `Phase 2: X/Y rolls (All in!)`.
+5. **Stop Phase 2:** Click **`Stop Phase 2`**.
+6. **Award Item:** Select winner and click **`Award`**. A green chat confirmation will print: `[Rolling SR] <Item> awarded to <Player>. Extra rolls reset to 0.`
+
+### Post-Raid (Officers)
+- [ ] Download CSV export from softres.it for each raid team.
+- [ ] Paste into `CSV_Raid1`, `CSV_Raid2`, etc.
+- [ ] Click **Rolling SR → Process Weekly SRs** in Google Sheets.
+- [ ] Confirm the toast summary (e.g. `Updated 45 guild members. Ignored 6 pug(s)`).
+
+---
+
+## FAQ & Troubleshooting
 
 #### What happens if a Pug ties with a Guild member in Phase 1?
 Gargul automatically launches a tie-break round between the tied players only. If the Pug wins the tie-break, the Pug wins the item outright (no Phase 2). If the Guild member wins the tie-break, Gargul transitions to Phase 2 for bonus rolls.
 
+#### What happens if two Guild members tie in Phase 1?
+If top rolls tie in Phase 1 and no Pug is involved (e.g. two guild members both roll 100), Gargul bypasses the Phase 1 tie-break and transitions directly to Phase 2, where both players can use their bonus rolls.
+
+#### What happens if players tie again during a tie-break?
+Gargul handles multiple consecutive tie-breaks automatically. If players tie in Round 1, Gargul increments to Round 2 and asks tied players to roll again.
+
+#### What happens if an ML accidentally clicks "Stop Phase 1" too early?
+Click the **`Clear`** button in the Master Looter UI. This resets the current roll-off so you can click **`Start`** to restart the roll-off fresh.
+
+#### What if a dropped item wasn't soft-reserved by anyone?
+If no guild member or pug reserved the item, Gargul's standard behavior takes over (e.g. normal MS > OS rolling or GDKP/auction, depending on your configuration). Rolling SR only activates when an item is tracked.
+
 #### What happens if a player rolls more than their allowed count in Phase 2?
-Gargul tracks roll counts per player in Phase 2. Rolls beyond `1 + ExtraRolls` are discarded and do not count toward the results.
+Gargul tracks roll counts per player in Phase 2. Excess rolls beyond `1 + ExtraRolls` are rejected by the addon engine and discarded from the roll table.
 
 #### How do Alts work?
 Set the player's status in `Roster_And_Rolls` column B to `Alt`. They accumulate rolls on reserved items identically to main raiders.
+
+#### How do I manually reset or edit a player's rolls?
+- **In-Game:** Re-importing a string via `/gl rsr <string>` updates rolls immediately. To wipe data, use `/gl rsr clear`.
+- **In Google Sheets:** Run `markItemWon("PlayerName", "ItemName")` from the script editor or simply edit their roll count in column D/F of `Roster_And_Rolls`, then run `writeAddonExport()`.
+
+---
+
+## Automated Test Suites
+
+The repository contains two automated test suites to verify functionality:
+
+### 1. Addon Unit Tests (16 Tests)
+Validates Phase 1 gating, tie-break rounds, Phase 2 bonus limits, Pug wins, item award resets, live counter calculations, slash commands, comms broadcast, Unicode UTF-8 quote normalization, and irregular whitespace parsing.
+```powershell
+Scripts\bin\lua5.1.exe scratch\test_rolling_sr.lua
+```
+
+### 2. Google Sheet Business Logic Tests (14 Tests)
+Validates roll accumulation (+1), changed item resets, dropped item resets, 1-miss grace periods, 2-miss resets, bench attendance credits, Pug filtering, and multi-raid CSV merging.
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\test_sheets_logic.ps1
+```

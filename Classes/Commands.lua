@@ -136,6 +136,10 @@ GL.Commands = GL.Commands or {
         ro = "rolloff",
         roll = "rolloff",
 
+        -- rollingsr
+        rsr = "rollingsr",
+        rollingsr = "rollingsr",
+
         -- settings
         co = "settings",
         config = "settings",
@@ -332,6 +336,9 @@ GL.Commands = GL.Commands or {
 
         -- Check if everyone is running the most up-to-date version
         inspect = function (...) GL.BagInspector:inspect(...); end,
+
+        -- Rolling SRloot system
+        rollingsr = function (...) GL.RollingSR:handleCommand(...); end,
     }
 };
 
@@ -411,7 +418,7 @@ function Commands:_dispatch(str)
     -- We do that by specifying the number of (expected) arguments per command
     local numberOfArguments;
 
-    if (GL:inTable({ "rolloff", "auction", }, command)) then
+    if (GL:inTable({ "rolloff", "auction", "rollingsr", }, command)) then
         numberOfArguments = 1;
     elseif (GL:inTable({ "award", }, command)) then
         numberOfArguments = 2;

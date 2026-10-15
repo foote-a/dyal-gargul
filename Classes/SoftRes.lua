@@ -851,6 +851,19 @@ function SoftRes:tooltipLines(itemLink)
             entryString = (L["%s (%sx)"]):format(entryString, Entry.reservations);
         end
 
+        if (GL.RollingSR and GL.RollingSR:hasData()) then
+            local extra = GL.RollingSR:getExtraRolls(Entry.player, itemLink);
+            if (GL.RollingSR:isGuildPlayer(Entry.player)) then
+                if (extra > 0) then
+                    entryString = entryString .. (" |cFF00FF00(+%d bonus)|r"):format(extra);
+                else
+                    entryString = entryString .. " |cFF888888(+0)|r";
+                end
+            else
+                entryString = entryString .. " |cFFFF8800(Pug)|r";
+            end
+        end
+
         -- Add the actual soft reserves to the tooltip
         tinsert(Lines, entryString);
     end

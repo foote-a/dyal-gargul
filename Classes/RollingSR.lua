@@ -37,8 +37,10 @@ end
 ---@return string
 local function normalizeItem(itemName)
     local s = strlower(strtrim(tostring(itemName or ""):match("%[(.-)%]") or tostring(itemName or "")));
-    -- Normalize curly/typographic quotes to standard apostrophe
-    s = s:gsub("[\226\128\153\226\128\152`'’‘]", "'");
+    -- Normalize multi-byte UTF-8 curly quotes to standard ASCII apostrophe
+    s = s:gsub("\226\128\153", "'");
+    s = s:gsub("\226\128\152", "'");
+    s = s:gsub("[`'´]", "'");
     s = s:gsub("%s+", " ");
     return s;
 end
@@ -51,6 +53,7 @@ function RollingSR:_init()
 
     -- Restore saved extra rolls across /reload or relog
     self.ExtraRolls = GL.DB:get("RollingSR.ExtraRolls", {}) or {};
+    self.rawImportString = GL.DB:get("RollingSR.rawImportString", "") or "";
 
     GL.Events:register("RollingSRRollOffStarted", "GL.ROLLOFF_STARTED", function ()
         local currentItem = GL.RollOff.CurrentRollOff.itemName or GL.RollOff.CurrentRollOff.itemLink;
@@ -58,6 +61,12 @@ function RollingSR:_init()
             self:beginPhase1();
         else
             self:resetPhase();
+        end
+    end);
+
+    GL.Events:register("RollingSRRollAccepted", "GL.ROLLOFF_ROLL_ACCEPTED", function ()
+        if (self:isActive() and GL.RollOff:startedByMe()) then
+            GL.MasterLooterUI:updateWidgets();
         end
     end);
 
@@ -106,9 +115,19 @@ function RollingSR:parseImportString(data)
     end
 
     self.ExtraRolls = Parsed;
+    self.rawImportString = data;
     self:persist();
 
     return not GL:empty(Parsed);
+end
+
+---@return number
+function RollingSR:countPlayers()
+    local count = 0;
+    for _ in pairs(self.ExtraRolls or {}) do
+        count = count + 1;
+    end
+    return count;
 end
 
 ---@return boolean
@@ -476,6 +495,9 @@ end
 ---@return nil
 function RollingSR:persist()
     GL.DB:set("RollingSR.ExtraRolls", self.ExtraRolls);
+    if (self.rawImportString) then
+        GL.DB:set("RollingSR.rawImportString", self.rawImportString);
+    end
 end
 
 --- Reset extra rolls to 0 for a player who won the item
@@ -495,13 +517,204 @@ function RollingSR:onItemAwarded(winner, itemLinkOrID)
     if (self.ExtraRolls[name][itemName]) then
         self.ExtraRolls[name][itemName] = 0;
         self:persist();
-        GL:debug(("Rolling SR: Reset extra rolls for %s on %s"):format(winner, itemName));
+
+        local itemDisplay = tostring(itemLinkOrID or itemName);
+        if (type(itemLinkOrID) == "number" and GetItemInfo) then
+            local _, link = GetItemInfo(itemLinkOrID);
+            if (link) then
+                itemDisplay = link;
+            end
+        end
+
+        GL:success(("[Rolling SR] %s awarded to %s. Extra rolls reset to 0."):format(
+            itemDisplay,
+            GL:capitalize(winner)
+        ));
     end
 end
 
 ---@return nil
 function RollingSR:clear()
     self.ExtraRolls = {};
+    self.rawImportString = "";
     self:resetPhase();
     self:persist();
+end
+
+--- Format live status text for the Master Looter UI
+---
+---@param itemLinkOrName string
+---@return string
+function RollingSR:getStatusText(itemLinkOrName)
+    if (not self:isActive()) then
+        return "";
+    end
+
+    if (self.phase == PHASE_ONE) then
+        if (self.round > 0) then
+            local tiedTotal = 0;
+            local tiedRolled = 0;
+            for name in pairs(self.TiedPlayers or {}) do
+                tiedTotal = tiedTotal + 1;
+                if ((self.RollCounts[name] or 0) > 0) then
+                    tiedRolled = tiedRolled + 1;
+                end
+            end
+            return ("|cFFFFCC00Tie-Break: %d/%d rolled|r"):format(tiedRolled, tiedTotal);
+        else
+            local reservists = {};
+            local totalReservists = 0;
+            if (GL.SoftRes and GL.SoftRes:available()) then
+                for _, name in pairs(GL.SoftRes:byItemLink(itemLinkOrName) or {}) do
+                    local n = normalizeName(name);
+                    if (not reservists[n]) then
+                        reservists[n] = true;
+                        totalReservists = totalReservists + 1;
+                    end
+                end
+            end
+
+            if (totalReservists > 0) then
+                local rolledCount = 0;
+                for name in pairs(reservists) do
+                    if ((self.RollCounts[name] or 0) > 0) then
+                        rolledCount = rolledCount + 1;
+                    end
+                end
+                return ("|cFF00FF00Phase 1: %d/%d rolled|r"):format(rolledCount, totalReservists);
+            end
+
+            return "|cFF00FF00Phase 1: In Progress|r";
+        end
+    elseif (self.phase == PHASE_TWO) then
+        local totalAllowed = 0;
+        local totalCast = 0;
+        local normalizedItem = normalizeItem(itemLinkOrName);
+
+        for name, items in pairs(self.ExtraRolls) do
+            if (items[normalizedItem] ~= nil) then
+                local allowed = 1 + (items[normalizedItem] or 0);
+                totalAllowed = totalAllowed + allowed;
+                local used = self.RollCounts[name] or 0;
+                totalCast = totalCast + math.min(used, allowed);
+            end
+        end
+
+        if (totalAllowed > 0) then
+            if (totalCast >= totalAllowed) then
+                return ("|cFF00BFFFPhase 2: %d/%d (All in!)|r"):format(totalCast, totalAllowed);
+            end
+            return ("|cFF00BFFFPhase 2: %d/%d rolls|r"):format(totalCast, totalAllowed);
+        end
+
+        return "|cFF00BFFFPhase 2: In Progress|r";
+    end
+
+    return "";
+end
+
+--- Broadcast the weekly extra rolls data over addon comms to group or guild
+---
+---@param channel? string "GROUP" or "GUILD"
+---@return nil
+function RollingSR:broadcast(channel)
+    if (not self:hasData()) then
+        GL:warning("[Rolling SR] No extra rolls data to broadcast. Import data first.");
+        return;
+    end
+
+    local payload = self.rawImportString;
+    if (GL:empty(payload)) then
+        local Entries = {};
+        for name, items in pairs(self.ExtraRolls) do
+            local ItemPairs = {};
+            for item, rolls in pairs(items) do
+                tinsert(ItemPairs, ("%s=%d"):format(item, rolls));
+            end
+            if (#ItemPairs > 0) then
+                tinsert(Entries, ("%s:%s"):format(GL:capitalize(name), table.concat(ItemPairs, ",")));
+            end
+        end
+        payload = table.concat(Entries, ";") .. ";";
+    end
+
+    local targetChannel = channel;
+    if (not targetChannel or targetChannel == "") then
+        targetChannel = GL.User.isInGroup and "GROUP" or "GUILD";
+    end
+
+    GL.CommMessage.new({
+        action = GL.Data.Constants.Comm.Actions.broadcastRollingSRData,
+        content = payload,
+        channel = targetChannel,
+    }):send();
+
+    GL:success(("[Rolling SR] Broadcasted extra rolls for %d players to %s."):format(self:countPlayers(), targetChannel));
+end
+
+--- Receive broadcasted extra rolls data from another officer/ML
+---
+---@param Message CommMessage
+---@return nil
+function RollingSR:receiveBroadcast(Message)
+    if (Message.Sender.isSelf) then
+        return;
+    end
+
+    if (not Message.content or Message.content == "") then
+        return;
+    end
+
+    local success = self:parseImportString(Message.content);
+    if (success) then
+        GL:success(("[Rolling SR] Synced extra rolls from %s (%d players updated)."):format(Message.Sender.name or "officer", self:countPlayers()));
+    end
+end
+
+--- Handle "/gl rsr <args>" slash command
+---
+---@param argumentString string
+---@return nil
+function RollingSR:handleCommand(argumentString)
+    local arg = strtrim(argumentString or "");
+
+    if (arg == "") then
+        GL:message(("[Rolling SR] Tracking bonus rolls for %d players."):format(self:countPlayers()));
+        GL:message("Commands:");
+        GL:message("  /gl rsr <string>       - Import extra rolls string");
+        GL:message("  /gl rsr broadcast      - Broadcast data to raid group or guild");
+        GL:message("  /gl rsr clear          - Clear all extra rolls data");
+        return;
+    end
+
+    local lowerArg = strlower(arg);
+
+    if (lowerArg == "broadcast" or lowerArg == "sync") then
+        self:broadcast();
+        return;
+    end
+
+    if (lowerArg == "broadcast guild" or lowerArg == "sync guild") then
+        self:broadcast("GUILD");
+        return;
+    end
+
+    if (lowerArg == "broadcast group" or lowerArg == "broadcast raid" or lowerArg == "sync raid") then
+        self:broadcast("GROUP");
+        return;
+    end
+
+    if (lowerArg == "clear") then
+        self:clear();
+        GL:success("[Rolling SR] Cleared all extra rolls data.");
+        return;
+    end
+
+    -- Otherwise, treat argumentString as the import string
+    local success = self:parseImportString(arg);
+    if (success) then
+        GL:success(("[Rolling SR] Successfully imported bonus rolls for %d players!"):format(self:countPlayers()));
+    else
+        GL:warning("[Rolling SR] Failed to import. Expected format: Player:Item=Rolls,Item=Rolls;");
+    end
 end

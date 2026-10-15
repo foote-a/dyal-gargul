@@ -51,6 +51,9 @@ Comm.Actions = {
     [Actions.broadcastTMBData] = function (Message)
         GL.TMB:receiveBroadcast(Message);
     end,
+    [Actions.broadcastRollingSRData] = function (Message)
+        GL.RollingSR:receiveBroadcast(Message);
+    end,
     [Actions.inspectBags] = function (Message)
         GL.BagInspector:report(Message);
     end,
