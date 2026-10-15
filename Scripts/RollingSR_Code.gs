@@ -63,46 +63,71 @@ function normItem(raw) {
 // ── CSV Parser ──────────────────────────────────────────────────────────────────
 
 /**
- * Parse the softres.it CSV from the CSV_Import tab.
- * Expected columns (order detected from header): Name, Class, ItemId, ItemName, Note, Plus.
+ * Parse softres.it CSVs from all tabs starting with "CSV_" (e.g. CSV_Import, CSV_Raid1, CSV_Raid2, etc.).
+ * If you have multiple concurrent raids, you can either:
+ *   a) Put each raid's softres export into its own tab (e.g. CSV_Raid1, CSV_Raid2, CSV_Raid3, CSV_Raid4).
+ *   b) Paste them all one below another into CSV_Import (repeated headers are automatically ignored).
  *
+ * Expected columns: Name, Class, ItemId, ItemName, Note, Plus.
  * Returns a map: { playerName: { items: [itemName, ...], class: string } }
- * Each item appears once per reservation (double-reserving the same item = two entries).
  */
 function parseSoftresCSV() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("CSV_Import");
-  if (!sheet) throw new Error("CSV_Import tab not found.");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets().filter(function (s) {
+    return s.getName().toUpperCase().indexOf("CSV") === 0;
+  });
 
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) throw new Error("CSV_Import is empty or has no data rows.");
-
-  // Detect header columns
-  var header = data[0].map(function (h) { return h.toString().trim(); });
-  var colIdx = {};
-  header.forEach(function (h, i) { colIdx[h] = i; });
-
-  var nameCol = colIdx["Name"];
-  var itemCol = colIdx["ItemName"] !== undefined ? colIdx["ItemName"] : colIdx["Item Name"];
-  var classCol = colIdx["Class"];
-
-  if (nameCol === undefined || itemCol === undefined) {
-    throw new Error("CSV header must contain 'Name' and 'ItemName' (or 'Item Name') columns.");
+  if (sheets.length === 0) {
+    throw new Error("No CSV import tabs found (expected tab name starting with 'CSV', e.g. 'CSV_Import' or 'CSV_Raid1').");
   }
 
   var players = {};
-  for (var r = 1; r < data.length; r++) {
-    var row = data[r];
-    var pName = normName(row[nameCol]);
-    var iName = normItem(row[itemCol]);
-    if (!pName || !iName) continue;
+  var totalRowsParsed = 0;
 
-    if (!players[pName]) {
-      players[pName] = {
-        items: [],
-        class: classCol !== undefined ? row[classCol].toString().trim() : "",
-      };
+  sheets.forEach(function (sheet) {
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return; // Empty or header-only tab
+
+    // Detect header columns for this sheet
+    var header = data[0].map(function (h) { return h.toString().trim(); });
+    var colIdx = {};
+    header.forEach(function (h, i) { colIdx[h] = i; });
+
+    var nameCol = colIdx["Name"];
+    var itemCol = colIdx["ItemName"] !== undefined ? colIdx["ItemName"] : colIdx["Item Name"];
+    var classCol = colIdx["Class"];
+
+    if (nameCol === undefined || itemCol === undefined) {
+      // Not a valid softres CSV tab, skip
+      return;
     }
-    players[pName].items.push(iName);
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var rawName = row[nameCol];
+      var rawItem = row[itemCol];
+
+      // Ignore empty rows or repeated headers pasted mid-sheet
+      if (!rawName || !rawItem) continue;
+      if (rawName.toString().trim().toLowerCase() === "name") continue;
+
+      var pName = normName(rawName);
+      var iName = normItem(rawItem);
+      if (!pName || !iName) continue;
+
+      if (!players[pName]) {
+        players[pName] = {
+          items: [],
+          class: classCol !== undefined ? row[classCol].toString().trim() : "",
+        };
+      }
+      players[pName].items.push(iName);
+      totalRowsParsed++;
+    }
+  });
+
+  if (totalRowsParsed === 0) {
+    throw new Error("CSV tabs were found, but no reservation data rows were detected.");
   }
 
   return players;
@@ -178,14 +203,17 @@ function processWeeklySoftReserves() {
   // ── 2. Load existing roster ──
   var roster = readRoster(rosterSheet);
 
-  // Build a set of all player names (union of roster + this week's CSV).
-  var allPlayers = {};
-  Object.keys(roster).forEach(function (n) { allPlayers[n] = true; });
-  Object.keys(thisWeek).forEach(function (n) { allPlayers[n] = true; });
+  // ── 3. Find Pugs (names in CSV that are NOT on the guild roster) ──
+  var pugsIgnored = [];
+  Object.keys(thisWeek).forEach(function (name) {
+    if (!roster[name]) {
+      pugsIgnored.push(name);
+    }
+  });
 
-  // ── 3. Process each player ──
-  Object.keys(allPlayers).forEach(function (name) {
-    var prev = roster[name] || null;
+  // ── 4. Process ONLY players on the guild roster ──
+  Object.keys(roster).forEach(function (name) {
+    var prev = roster[name];
     var curr = thisWeek[name] || null;
 
     // Normalise incoming items to exactly MAX_SR slots.
@@ -194,9 +222,7 @@ function processWeeklySoftReserves() {
     var newItem1 = newItems[0];
     var newItem2 = newItems[1];
 
-    // Determine status — keep existing status; default new players to "Member".
-    var status = prev ? prev.status : "Member";
-    // If the CSV provided a class but the player is brand new, still default to Member.
+    var status = prev.status || "Member";
 
     // ── Attendance / miss tracking ──
     if (curr) {
@@ -208,12 +234,8 @@ function processWeeklySoftReserves() {
       var rolls1 = calcExtraRolls(prev, 1, newItem1, status);
       var rolls2 = calcExtraRolls(prev, 2, newItem2, status);
 
-      if (prev) {
-        writePlayerRow(rosterSheet, prev.row, name, status, newItem1, rolls1, newItem2, rolls2, misses, lastRaid);
-      } else {
-        appendPlayerRow(rosterSheet, name, status, newItem1, rolls1, newItem2, rolls2, misses, lastRaid);
-      }
-    } else if (prev) {
+      writePlayerRow(rosterSheet, prev.row, name, status, newItem1, rolls1, newItem2, rolls2, misses, lastRaid);
+    } else {
       // Player NOT in this week's CSV.
       var newMisses = prev.misses + 1;
 
@@ -239,8 +261,15 @@ function processWeeklySoftReserves() {
     }
   });
 
-  // ── 4. Build and write the addon export string ──
+  // ── 5. Build and write the addon export string ──
   writeAddonExport(ss);
+
+  // ── 6. Toast summary ──
+  var msg = "Updated " + Object.keys(roster).length + " guild members.";
+  if (pugsIgnored.length > 0) {
+    msg += " Ignored " + pugsIgnored.length + " pug(s): " + pugsIgnored.join(", ");
+  }
+  ss.toast(msg, "Rolling SR", 10);
 }
 
 /**
