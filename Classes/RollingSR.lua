@@ -1119,6 +1119,82 @@ function RollingSR:printPlayerRolls(targetName)
     end
 end
 
+--- Alias a player name from SoftRes or sheet to their in-game character name
+---
+---@param fromName string
+---@param toName string
+---@return boolean
+function RollingSR:aliasPlayer(fromName, toName)
+    local fromTrimmed = strtrim(fromName or "");
+    local toTrimmed = strtrim(toName or "");
+    local fromLower = strlower(fromTrimmed);
+    local toCapitalized = GL:capitalize(toTrimmed);
+
+    if (fromTrimmed == "" or toTrimmed == "") then
+        GL:warning("[Rolling SR] Usage: /rsr alias <SoftResName> <CharacterName>");
+        return false;
+    end
+
+    local updatedSR = 0;
+    local itemNames = {};
+
+    if (GL.SoftRes and GL.SoftRes:available()) then
+        for _, Reservation in pairs(GL.DB:get("SoftRes.SoftReserves", {}) or {}) do
+            if (strlower(Reservation.name or "") == fromLower) then
+                Reservation.name = toCapitalized;
+                updatedSR = updatedSR + 1;
+                local itemName = GL:getCachedItem(Reservation.itemID) and GL:getCachedItem(Reservation.itemID).name or tostring(Reservation.itemID);
+                tinsert(itemNames, itemName);
+            end
+        end
+
+        if (updatedSR > 0) then
+            if (GL.SoftRes.materializeData) then
+                GL.SoftRes:materializeData();
+            end
+            if (GL.Interface and GL.Interface.SoftRes and GL.Interface.SoftRes.Overview and GL.Interface.SoftRes.Overview.frame and GL.Interface.SoftRes.Overview.frame:IsShown()) then
+                GL.Interface.SoftRes.Overview:draw();
+            end
+            if (GL.SoftRes.broadcast and GL.User and GL.User.isInGroup and (GL.User.isMasterLooter or GL.User.hasAssist)) then
+                GL.SoftRes:broadcast();
+            end
+        end
+    end
+
+    local updatedRSR = false;
+    if (self.ExtraRolls[fromLower]) then
+        self.ExtraRolls[normalizeName(toTrimmed)] = self.ExtraRolls[fromLower];
+        self.ExtraRolls[fromLower] = nil;
+        if (self.Alts[fromLower]) then
+            self.Alts[normalizeName(toTrimmed)] = true;
+            self.Alts[fromLower] = nil;
+        end
+        if (self.Recruits[fromLower]) then
+            self.Recruits[normalizeName(toTrimmed)] = true;
+            self.Recruits[fromLower] = nil;
+        end
+        self:persist();
+        updatedRSR = true;
+    end
+
+    if (updatedSR == 0 and not updatedRSR) then
+        GL:warning(("[Rolling SR] No soft reserves or bonus rolls found for '%s'."):format(fromTrimmed));
+        return false;
+    end
+
+    local details = {};
+    if (updatedSR > 0) then
+        local itemsStr = #itemNames > 0 and (" (" .. table.concat(itemNames, ", ") .. ")") or "";
+        tinsert(details, ("%d soft reserve(s)%s"):format(updatedSR, itemsStr));
+    end
+    if (updatedRSR) then
+        tinsert(details, "bonus rolls table updated");
+    end
+
+    GL:success(("[Rolling SR] Aliased '%s' to '%s': %s."):format(fromTrimmed, toCapitalized, table.concat(details, ", ")));
+    return true;
+end
+
 --- Handle "/rsr <args>" (or "/gl rsr <args>") slash command
 ---
 ---@param argumentString string
@@ -1131,6 +1207,7 @@ function RollingSR:handleCommand(argumentString)
         GL:message(("[Rolling SR] Tracking %d guild players (max cap: %d, alt rolls: %s)."):format(self:countPlayers(), self.maxExtraRolls or 100, altMode));
         GL:message("Commands (all 1-2 words):");
         GL:message("  /rsr <string>    - Import Addon_Export string & auto-broadcast");
+        GL:message("  /rsr alias <a> <b>- Alias SoftRes/sheet name 'a' to character 'b'");
         GL:message("  /rsr list        - List all loaded guild Mains, Alts & bonus rolls");
         GL:message("  /rsr <player>    - Check bonus rolls for a player (e.g. /rsr Thrall)");
         GL:message("  /rsr won         - Export won items string for Google Sheets");
@@ -1144,6 +1221,12 @@ function RollingSR:handleCommand(argumentString)
     end
 
     local lowerArg = strlower(arg);
+
+    local aliasFrom, aliasTo = arg:match("^[aA][lL][iI][aA][sS]%s+([^%s]+)%s+([^%s]+)$");
+    if (aliasFrom and aliasTo) then
+        self:aliasPlayer(aliasFrom, aliasTo);
+        return;
+    end
 
     if (lowerArg == "list" or lowerArg == "status") then
         self:printPlayerRolls();

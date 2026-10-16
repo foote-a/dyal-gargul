@@ -45,7 +45,7 @@ local GL = {
     Events = { register = function () end, },
     empty = function (_, v) return v == nil or v == "" or (type(v) == "table" and next(v) == nil); end,
     disambiguateName = function (_, n) return tostring(n or ""):match("^([^-]+)") or tostring(n or ""); end,
-    capitalize = function (_, n) return n:sub(1, 1):upper() .. n:sub(2):lower(); end,
+    capitalize = function (_, n) return (tostring(n or ""):gsub("^%l", string.upper)); end,
     sendChatMessage = function (_, msg, channel, _, target)
         tinsert(chatLog, { msg = msg, channel = channel, target = target, });
     end,
@@ -60,8 +60,15 @@ local GL = {
         print("[TEST GL:warning] " .. tostring(msg));
     end,
     getItemNameFromLink = function (_, link) return tostring(link):match("%[(.-)%]") or link; end,
+    getCachedItem = function (_, id) return { name = "Brutality Blade", itemID = id, }; end,
     DB = {
-        get = function () return {}; end,
+        SoftRes = {},
+        get = function (self, key, default)
+            if (key == "SoftRes.SoftReserves") then
+                return (self.SoftRes and self.SoftRes.SoftReserves) or default;
+            end
+            return default or {};
+        end,
         set = function () end,
     },
     Data = {
@@ -768,4 +775,56 @@ assert(#chatLog == 1 and chatLog[1].msg:find("Phase 1 roll stands in Phase 2"), 
 mockSoftRes.byItemID = nil;
 print("Test 29 passed!");
 
-print("\nALL 29 ROLLING SR UNIT TESTS PASSED SUCCESSFULLY!");
+print("--- Test 30: In-Game Alias Mapping (/rsr alias <SoftResName> <CharacterName>) ---");
+R:handleCommand("clear");
+mockSoftRes._byItemID = { [18832] = { "DiscordTag" } };
+mockSoftRes.byItemID = function (_, id) return mockSoftRes._byItemID[id] or {}; end;
+mockSoftRes.itemIDIsReservedByPlayer = function (_, itemID, player)
+    for _, name in pairs(mockSoftRes._byItemID[itemID] or {}) do
+        if (strlower(name) == strlower(player)) then return true; end
+    end
+    return false;
+end;
+
+GL.DB.SoftRes = {
+    SoftReserves = {
+        { name = "DiscordTag", itemID = 18832 },
+    },
+};
+mockSoftRes.materializeData = function ()
+    mockSoftRes._byItemID[18832] = {};
+    for _, res in pairs(GL.DB.SoftRes.SoftReserves) do
+        tinsert(mockSoftRes._byItemID[18832], res.name);
+    end
+end;
+
+mockRollOff.CurrentRollOff.itemID = 18832;
+mockRollOff.CurrentRollOff.itemName = "Brutality Blade";
+mockRollOff.CurrentRollOff.itemLink = "[Brutality Blade]";
+mockRollOff.CurrentRollOff.Rolls = {};
+
+-- Before alias: InGamePug cannot roll because reserve is under DiscordTag
+R:beginPhase1();
+assert(R:acceptRoll({ player = "InGamePug", amount = 88 }) == false, "InGamePug must be rejected before alias!");
+
+-- Execute alias command: /rsr alias DiscordTag InGamePug
+local aliasSuccess = R:aliasPlayer("DiscordTag", "InGamePug");
+assert(aliasSuccess == true, "aliasPlayer must return true!");
+assert(GL.DB.SoftRes.SoftReserves[1].name == "InGamePug", "Soft reserve name must be updated to InGamePug!");
+
+-- After alias: InGamePug roll is accepted!
+assert(R:acceptRoll({ player = "InGamePug", amount = 88 }) == true, "InGamePug roll must be accepted after alias!");
+
+-- Also test aliasing for guild player ExtraRolls:
+R:parseImportString("OldName:Brutality Blade=2;");
+assert(R:getExtraRolls("OldName", "Brutality Blade") == 2);
+R:handleCommand("alias OldName NewName");
+assert(R:getExtraRolls("NewName", "Brutality Blade") == 2, "NewName must have the 2 bonus rolls!");
+assert(R:getExtraRolls("OldName", "Brutality Blade") == 0, "OldName must no longer exist!");
+
+mockSoftRes.byItemID = nil;
+mockSoftRes.itemIDIsReservedByPlayer = nil;
+mockSoftRes.materializeData = nil;
+print("Test 30 passed!");
+
+print("\nALL 30 ROLLING SR UNIT TESTS PASSED SUCCESSFULLY!");
