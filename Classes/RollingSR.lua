@@ -76,7 +76,7 @@ function RollingSR:_init()
     self.rawImportString = GL.DB:get("RollingSR.rawImportString", "") or "";
 
     GL.Events:register("RollingSRRollOffStarted", "GL.ROLLOFF_STARTED", function ()
-        local currentItem = GL.RollOff.CurrentRollOff.itemName or GL.RollOff.CurrentRollOff.itemLink;
+        local currentItem = GL.RollOff.CurrentRollOff.itemLink or GL.RollOff.CurrentRollOff.itemName;
         if (self:tracksItem(currentItem)) then
             self:beginPhase1();
         else
@@ -208,8 +208,20 @@ function RollingSR:tracksItem(itemLinkOrName)
         end
     end
 
-    if (GL.SoftRes and GL.SoftRes:available() and GL.SoftRes.byItemLink) then
-        for _, srName in pairs(GL.SoftRes:byItemLink(itemLinkOrName) or {}) do
+    if (GL.SoftRes and GL.SoftRes:available()) then
+        local itemID = (GL.getItemIDFromLink and GL:getItemIDFromLink(itemLinkOrName)) or tonumber(tostring(itemLinkOrName or ""):match("item:(%d+)"));
+        if (not itemID and GL.RollOff and GL.RollOff.CurrentRollOff) then
+            itemID = GL.RollOff.CurrentRollOff.itemID;
+        end
+
+        local reservists = {};
+        if (itemID and GL.SoftRes.byItemID) then
+            reservists = GL.SoftRes:byItemID(itemID) or {};
+        elseif (GL.SoftRes.byItemLink) then
+            reservists = GL.SoftRes:byItemLink(itemLinkOrName) or {};
+        end
+
+        for _, srName in pairs(reservists) do
             if (self:isGuildPlayer(srName)) then
                 return true;
             end
@@ -262,14 +274,23 @@ end
 ---@param playerName string
 ---@return boolean
 function RollingSR:reservedCurrentItem(playerName)
-    local CurrentRollOff = GL.RollOff.CurrentRollOff;
-    local Items = self.ExtraRolls[normalizeName(playerName)];
+    local CurrentRollOff = GL.RollOff and GL.RollOff.CurrentRollOff;
+    if (not CurrentRollOff) then
+        return false;
+    end
 
-    if (Items and Items[normalizeItem(CurrentRollOff.itemName)] ~= nil) then
+    local Items = self.ExtraRolls[normalizeName(playerName)];
+    local normItem = normalizeItem(CurrentRollOff.itemName or CurrentRollOff.itemLink or "");
+
+    if (Items and normItem ~= "" and Items[normItem] ~= nil) then
         return true;
     end
 
-    return GL.SoftRes:itemIDIsReservedByPlayer(CurrentRollOff.itemID, playerName);
+    if (GL.SoftRes and GL.SoftRes.itemIDIsReservedByPlayer and CurrentRollOff.itemID) then
+        return GL.SoftRes:itemIDIsReservedByPlayer(CurrentRollOff.itemID, playerName);
+    end
+
+    return false;
 end
 
 --- Did at least one Full Guild Member reserve the current roll-off item?
@@ -321,19 +342,26 @@ function RollingSR:anyPugReservedCurrentItem()
     return false;
 end
 
---- Check whether any player in the raid group is a Pug (not in guild ExtraRolls)
+--- Check whether any player in the raid (or party) group is a Pug (not in guild ExtraRolls)
 ---
 ---@return boolean
 function RollingSR:anyPugInRaid()
-    if (not IsInRaid or not IsInRaid()) then
-        return false;
-    end
-
-    local numMembers = GetNumGroupMembers and GetNumGroupMembers() or 0;
-    for i = 1, numMembers do
-        local name = GetRaidRosterInfo and GetRaidRosterInfo(i);
-        if (name and not self:isGuildPlayer(name)) then
-            return true;
+    if (IsInRaid and IsInRaid()) then
+        local numMembers = GetNumGroupMembers and GetNumGroupMembers() or 0;
+        for i = 1, numMembers do
+            local name = GetRaidRosterInfo and GetRaidRosterInfo(i);
+            if (name and not self:isGuildPlayer(name)) then
+                return true;
+            end
+        end
+    elseif (IsInGroup and IsInGroup()) then
+        local numMembers = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0;
+        for i = 1, numMembers do
+            local unit = "party" .. i;
+            local name = UnitName and UnitName(unit);
+            if (name and not self:isGuildPlayer(name)) then
+                return true;
+            end
         end
     end
 
@@ -466,7 +494,8 @@ function RollingSR:acceptRoll(Roll)
             return false;
         end
 
-        allowed = self:allowedPhase2Rolls(playerName, GL.RollOff.CurrentRollOff.itemName);
+        local currentItem = GL.RollOff and GL.RollOff.CurrentRollOff and (GL.RollOff.CurrentRollOff.itemName or GL.RollOff.CurrentRollOff.itemLink) or "";
+        allowed = self:allowedPhase2Rolls(playerName, currentItem);
     end
 
     if (used >= allowed) then
@@ -848,7 +877,19 @@ function RollingSR:getStatusText(itemLinkOrName)
             local reservists = {};
             local totalReservists = 0;
             if (GL.SoftRes and GL.SoftRes:available()) then
-                for _, name in pairs(GL.SoftRes:byItemLink(itemLinkOrName) or {}) do
+                local itemID = (GL.getItemIDFromLink and GL:getItemIDFromLink(itemLinkOrName)) or tonumber(tostring(itemLinkOrName or ""):match("item:(%d+)"));
+                if (not itemID and GL.RollOff and GL.RollOff.CurrentRollOff) then
+                    itemID = GL.RollOff.CurrentRollOff.itemID;
+                end
+
+                local resList = {};
+                if (itemID and GL.SoftRes.byItemID) then
+                    resList = GL.SoftRes:byItemID(itemID) or {};
+                elseif (GL.SoftRes.byItemLink) then
+                    resList = GL.SoftRes:byItemLink(itemLinkOrName) or {};
+                end
+
+                for _, name in pairs(resList) do
                     local n = normalizeName(name);
                     if (not reservists[n]) then
                         reservists[n] = true;
@@ -918,7 +959,7 @@ function RollingSR:broadcast(channel)
             for item, rolls in pairs(items) do
                 tinsert(ItemPairs, ("%s=%d"):format(item, rolls));
             end
-            local tag = self:isAlt(name) and "*alt" or "";
+            local tag = self:isAlt(name) and "*alt" or (self:isRecruit(name) and "*recruit" or "");
             tinsert(Entries, ("%s%s:%s"):format(GL:capitalize(name), tag, table.concat(ItemPairs, ",")));
         end
         payload = table.concat(Entries, ";") .. ";";

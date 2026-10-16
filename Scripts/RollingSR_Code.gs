@@ -956,7 +956,7 @@ function checkRecruitGraduation() {
   Object.keys(roster).forEach(function (name) {
     var entry = roster[name];
     if (entry.status === "Recruit" && !isRecruitInTrial(entry)) {
-      eligible.push({ name: name, row: entry.row, lastRaid: entry.lastRaid });
+      eligible.push({ name: name, row: entry.row, rolls1: entry.rolls1, rolls2: entry.rolls2, lastRaid: entry.lastRaid });
     }
   });
 
@@ -965,7 +965,10 @@ function checkRecruitGraduation() {
     return;
   }
 
-  var namesList = eligible.map(function (e) { return "• " + e.name + " (first recorded raid: " + e.lastRaid + ")"; }).join("\n");
+  var namesList = eligible.map(function (e) {
+    var weeks = Math.max(e.rolls1 || 0, e.rolls2 || 0);
+    return "• " + e.name + " (" + weeks + "+ week(s) attended / active since: " + e.lastRaid + ")";
+  }).join("\n");
   var resp = ui.alert(
     "🎓 Graduate Recruits (" + eligible.length + ")",
     "The following recruit(s) have completed their " + RECRUIT_TRIAL_WEEKS + "-week trial:\n\n" +
@@ -1423,25 +1426,48 @@ function linkAltDialog() {
  * Determine whether a player is a Recruit still within their 2-week trial
  * (i.e. they've attended fewer than RECRUIT_TRIAL_WEEKS raids).
  *
- * Heuristic: if status is "Recruit" AND lastRaid is within the trial window
- * (or they have very few recorded raids), treat them as in-trial.
- * Because the sheet only stores the last raid date (not total raid count),
- * we check whether their first recorded appearance was fewer than
- * RECRUIT_TRIAL_WEEKS weeks ago. Officers can graduate a recruit by changing
- * their status to "Member" at any time.
+ * Checks:
+ * 1. If accumulated rolls in either slot reach or exceed RECRUIT_TRIAL_WEEKS (2 raids),
+ *    they have completed their trial.
+ * 2. If an archive tab exists from >= 2 weeks ago containing the recruit, they've completed trial.
+ * Otherwise, they are still within their 2-week trial period.
  */
 function isRecruitInTrial(entry) {
   if (entry.status !== "Recruit") return false;
 
-  // If no last raid date recorded, they haven't raided yet — still in trial.
-  if (!entry.lastRaid) return true;
+  // 1. If accumulated rolls in either slot reach or exceed RECRUIT_TRIAL_WEEKS (2 raids),
+  // they've attended 2+ raids and completed their trial.
+  var maxRolls = Math.max(entry.rolls1 || 0, entry.rolls2 || 0);
+  if (maxRolls >= RECRUIT_TRIAL_WEEKS) return false;
 
-  var lastDate = new Date(entry.lastRaid);
-  var cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - (RECRUIT_TRIAL_WEEKS * 7));
+  // 2. Check archive snapshot tabs to see if the recruit appeared >= 2 weeks ago.
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) {
+      var sheets = ss.getSheets();
+      var cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - (RECRUIT_TRIAL_WEEKS * 7));
 
-  // If their last raid was within the trial window, they're still in trial.
-  return lastDate >= cutoff;
+      for (var i = 0; i < sheets.length; i++) {
+        var match = sheets[i].getName().match(/^Archive_(\d{4}-\d{2}-\d{2})/);
+        if (match) {
+          var archDate = new Date(match[1]);
+          if (archDate <= cutoff) {
+            var archData = sheets[i].getDataRange().getValues();
+            for (var r = 1; r < archData.length; r++) {
+              if (normName(archData[r][COL.NAME]) === normName(entry.name)) {
+                return false;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Spreadsheet unavailable during unit test or headless execution
+  }
+
+  return true;
 }
 
 // ── Menu ────────────────────────────────────────────────────────────────────────

@@ -113,7 +113,7 @@ function Importer:draw()
         local rsrText = strtrim(rollingExtraRollsContent or "");
 
         -- Route a Rolling SR string pasted into the top box to RollingSR
-        if (srText ~= "" and rsrText == "" and not srText:find("\n") and (srText:find("^[^:,;\n]+:[^=;\n]+=%s*%d+") or srText:find("^[^:,;\n]+%*[aA][lL][tT]:"))) then
+        if (srText ~= "" and rsrText == "" and not srText:find("\n") and (srText:find("^[^:,;\n]+:[^=;\n]+=%s*%d+") or srText:find("^[^:,;\n]+%*[aA][lL][tT]:") or srText:find("^[^:,;\n]+%*[rR][eE][cC][rR][uU][iI][tT]:"))) then
             rsrText = srText;
             srText = "";
         end

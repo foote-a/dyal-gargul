@@ -875,11 +875,7 @@ function SoftRes:tooltipLines(itemLink)
                     entryString = entryString .. " |cFF69CCF0(Alt)|r";
                 end
             elseif (GL.RollingSR.isRecruit and GL.RollingSR:isRecruit(Entry.player)) then
-                if (GL.RollingSR.pugsPresent and not GL.RollingSR:pugsPresent()) then
-                    entryString = entryString .. " |cFFFFCC00(Recruit - Locked)|r";
-                else
-                    entryString = entryString .. " |cFFFFCC00(Recruit - Trial)|r";
-                end
+                entryString = entryString .. " |cFFFFCC00(Recruit - Trial)|r";
             elseif (GL.RollingSR:isGuildPlayer(Entry.player)) then
                 if (extra > 0) then
                     entryString = entryString .. (" |cFF00FF00(+%d bonus)|r"):format(extra);
