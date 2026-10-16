@@ -4,7 +4,7 @@
 > **Fork Notice & Upstream Attribution:**
 > This repository is a specialized fork of the official [Gargul](https://github.com/papa-smurf/Gargul) World of Warcraft addon created by **Zhorax** ([CurseForge](https://www.curseforge.com/wow/addons/gargul) | [Wago](https://addons.wago.io/addons/gargul) | [Patreon](https://www.patreon.com/gargul)).
 >
-> This fork was created solely to implement our guild's custom **Two-Phase Rolling Soft Reserve ("Rolling SR")** loot system with weekly bonus roll accumulation, Mains vs. Alts eligibility rules, and Google Sheets Apps Script integration.
+> This fork exists specifically to implement our guild's custom **Two-Phase Rolling Soft Reserve ("Rolling SR")** loot system with weekly bonus roll accumulation, Mains vs. Alts eligibility rules, and Google Sheets Apps Script integration.
 >
 > **For all other use cases** (standard GDKP, traditional SoftRes, That's My Bis / TMB, ClassicPR, RRobin, standard +1 systems, and general Master Loot management), **we strongly recommend using the official upstream Gargul addon:**
 > - **Official GitHub:** [https://github.com/papa-smurf/Gargul](https://github.com/papa-smurf/Gargul)
@@ -12,8 +12,6 @@
 > - **Official Wago:** [https://addons.wago.io/addons/gargul](https://addons.wago.io/addons/gargul)
 >
 > Please only use this fork if you specifically need the Rolling SR loot rules documented below.
-
-A custom loot system for World of Warcraft raids integrating **Google Sheets** and a custom **Gargul** addon fork. It rewards raid consistency by allowing guild members to accumulate bonus rolls on reserved items week-over-week, while ensuring fair, competitive rolling alongside Alts and Pugs.
 
 ---
 
@@ -60,17 +58,17 @@ A custom loot system for World of Warcraft raids integrating **Google Sheets** a
      - **Guild Main or Alt Wins (or Guild-Only Tie):** Gargul advances to **Phase 2**.
   2. **Phase 2 (Guild Reservists Only):** Eligible guild members roll their bonus rolls (up to `1 + ExtraRolls` total rolls in Phase 2). The highest valid roll across Phase 1 and Phase 2 wins.
 
-| Rule | Behavior |
+### Streak, Status & Attendance Lifecycle
+| Trigger / Status | Behavior |
 |:---|:---|
-| **Same Item Reserved (Main)** | `+1` extra roll accumulated for next week (capped at `MAX_EXTRA_ROLLS = 100`). |
-| **Alt Character (`Status = Alt`)** | `0` extra rolls by default (configurable via `ALTS_ACCRUE_ROLLS` / `/rsr altrolls`); rolls in Phase 1 vs. Pugs; never wins over Mains; protects linked Main's streak. |
+| **Item Kept (Unwon)** | Gaining `+1` extra roll next week (capped at `MAX_EXTRA_ROLLS = 100`). |
 | **Item Changed or Dropped** | Extra rolls reset to `0` for that slot. |
-| **Item Won** | Resets to `0` in Gargul upon award; export all won items after raid with **`/rsr won`** to auto-update the Google Sheet. |
+| **Item Won** | Extra rolls reset to `0` in Gargul upon award; export with **`/rsr won`** after raid to auto-update the sheet. |
 | **1 Missed Raid** | Rolls preserved (1-week grace period); `Consecutive_Misses` set to `1`. |
 | **2+ Consecutive Misses** | All extra rolls reset to `0`. |
-| **Benched** | Marked as `Benched` before processing; keeps items, gains `+1` roll, accrues `0` misses. |
+| **Benched Status** | Marked as `Benched` before processing; keeps items, gains `+1` roll, accrues `0` misses. |
 | **Excused Absence** | Officer runs **🌴 Excuse Absence / Vacation**; resets consecutive misses to `0` to protect streak. |
-| **Recruit Trial** | Extra rolls accumulate internally in the sheet, but export as `0` until 2 weeks have elapsed. |
+| **Recruit Trial Period** | Extra rolls accumulate internally in the sheet, but export as `0` until 2 weeks have elapsed. |
 
 ---
 
