@@ -1,5 +1,18 @@
 # Rolling SR — System & User Guide
 
+> [!IMPORTANT]
+> **Fork Notice & Upstream Attribution:**
+> This repository is a specialized fork of the official [Gargul](https://github.com/papa-smurf/Gargul) World of Warcraft addon created by **Zhorax** ([CurseForge](https://www.curseforge.com/wow/addons/gargul) | [Wago](https://addons.wago.io/addons/gargul) | [Patreon](https://www.patreon.com/gargul)).
+>
+> This fork was created solely to implement our guild's custom **Two-Phase Rolling Soft Reserve ("Rolling SR")** loot system with weekly bonus roll accumulation, Mains vs. Alts eligibility rules, and Google Sheets Apps Script integration.
+>
+> **For all other use cases** (standard GDKP, traditional SoftRes, That's My Bis / TMB, ClassicPR, RRobin, standard +1 systems, and general Master Loot management), **we strongly recommend using the official upstream Gargul addon:**
+> - **Official GitHub:** [https://github.com/papa-smurf/Gargul](https://github.com/papa-smurf/Gargul)
+> - **Official CurseForge:** [https://www.curseforge.com/wow/addons/gargul](https://www.curseforge.com/wow/addons/gargul)
+> - **Official Wago:** [https://addons.wago.io/addons/gargul](https://addons.wago.io/addons/gargul)
+>
+> Please only use this fork if you specifically need the Rolling SR loot rules documented below.
+
 A custom loot system for World of Warcraft raids integrating **Google Sheets** and a custom **Gargul** addon fork. It rewards raid consistency by allowing guild members to accumulate bonus rolls on reserved items week-over-week, while ensuring fair, competitive rolling alongside Alts and Pugs.
 
 ---
