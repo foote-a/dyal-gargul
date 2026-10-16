@@ -2,11 +2,13 @@
  * Rolling SR — Google Apps Script for tracking per-item soft-reserve extra rolls.
  *
  * Sheet tabs:
- *   CSV_Import        — Officers paste raw softres.it CSV here.
- *   Roster_And_Rolls  — Master roster with accumulated extra rolls.
- *   Addon_Export       — Cell A1 holds the compressed import string for Gargul.
+ *   Roster_And_Rolls  — Master guild roster with accumulated extra rolls (never Pugs).
+ *   CSV_Import        — Officers paste raw softres.it CSV here (also supports CSV_Raid1..4).
+ *   Addon_Export      — Cell A1 holds the plain-text import string for Gargul.
+ *   Aliases           — Maps alt characters, nicknames, or typos to Roster_Character_Name.
  *
- * Run processWeeklySoftReserves() after each raid to update everything.
+ * Use the custom "Rolling SR" menu in Google Sheets to preview, commit, manage streaks,
+ * initialize tabs, or generate the Gargul addon export string.
  */
 
 // ── Config ──────────────────────────────────────────────────────────────────────
@@ -20,11 +22,17 @@ var MISS_THRESHOLD = 2;
 /** Weeks a recruit must attend before extra rolls can be spent. */
 var RECRUIT_TRIAL_WEEKS = 2;
 
+/** Maximum accumulated extra rolls per item slot (configurable cap). */
+var MAX_EXTRA_ROLLS = 100;
+
+/** Whether Alt characters accumulate stacking extra rolls (default: false). */
+var ALTS_ACCRUE_ROLLS = false;
+
 // ── Column indices (0-based) in Roster_And_Rolls ────────────────────────────────
 
 var COL = {
   PLAYER:    0,  // A – PlayerName
-  STATUS:    1,  // B – Member | Recruit | Alt | Pug
+  STATUS:    1,  // B – Member | Recruit | Alt | Benched
   ITEM1:     2,  // C – Item_1_Name
   ROLLS1:    3,  // D – Item_1_ExtraRolls
   ITEM2:     4,  // E – Item_2_Name
@@ -71,15 +79,60 @@ function stripAccents(str) {
   return s;
 }
 
+/**
+ * Check whether a status string represents an Alt (e.g., "Alt", "Alt (Dyal)", "Alt: Dyal").
+ */
+function isAltStatus(status) {
+  var s = (status || "").toString().trim().toLowerCase();
+  return s === "alt" || s.indexOf("alt ") === 0 || s.indexOf("alt(") === 0 || s.indexOf("alt:") === 0;
+}
+
+/**
+ * Extract a linked Main name if encoded in Status (e.g., "Alt (Dyal)" or "Alt: Dyal").
+ */
+function extractMainFromStatus(status) {
+  var s = (status || "").toString().trim();
+  if (!isAltStatus(s)) return "";
+  var openIdx = s.indexOf("(");
+  var closeIdx = s.indexOf(")");
+  if (openIdx !== -1 && closeIdx > openIdx + 1) {
+    return normName(s.slice(openIdx + 1, closeIdx));
+  }
+  var colonIdx = s.indexOf(":");
+  if (colonIdx !== -1 && colonIdx + 1 < s.length) {
+    return normName(s.slice(colonIdx + 1));
+  }
+  return "";
+}
+
+/**
+ * Find the Main character linked to an Alt via Status ("Alt (Main)") or the Aliases tab.
+ */
+function getLinkedMain(altName, roster, aliasMap) {
+  var normAlt = normName(altName);
+  if (roster && roster[normAlt]) {
+    var fromStatus = extractMainFromStatus(roster[normAlt].status);
+    if (fromStatus && roster[fromStatus]) {
+      return fromStatus;
+    }
+  }
+  if (aliasMap && aliasMap[normAlt] && roster && roster[aliasMap[normAlt]]) {
+    return aliasMap[normAlt];
+  }
+  return "";
+}
+
 // ── Aliases & Name Resolution ───────────────────────────────────────────────────
 
 /**
  * Read the Aliases sheet into a lookup map: { [normalizedAlias]: canonicalRosterName }.
+ * Also attaches _altTypes: { [normalizedAlias]: true } when optional Column C is "Alt".
  */
 function readAliases(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Aliases");
   var map = {};
+  Object.defineProperty(map, "_altTypes", { value: {}, enumerable: false, writable: true });
   if (!sheet) return map;
 
   var data = sheet.getDataRange().getValues();
@@ -88,10 +141,14 @@ function readAliases(ss) {
   for (var r = 1; r < data.length; r++) {
     var rawAlias = data[r][0];
     var rawTarget = data[r][1];
+    var rawType = (data[r][2] || "").toString().trim().toLowerCase();
     var alias = normName(rawAlias);
     var target = normName(rawTarget);
     if (alias && target) {
       map[alias] = target;
+      if (rawType === "alt") {
+        map._altTypes[alias] = true;
+      }
     }
   }
   return map;
@@ -103,24 +160,31 @@ function readAliases(ss) {
 function setupAliasesTab() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Aliases");
+  var created = false;
   if (!sheet) {
     sheet = ss.insertSheet("Aliases");
-    sheet.getRange(1, 1, 1, 2).setValues([["Alias_Or_Alt_Name", "Roster_Character_Name"]]);
-    sheet.getRange(1, 1, 1, 2).setFontWeight("bold");
-    sheet.setColumnWidth(1, 220);
-    sheet.setColumnWidth(2, 220);
-    SpreadsheetApp.getUi().alert(
-      "Aliases Tab Created",
-      "Created 'Aliases' tab!\n\nAdd any alt character names, Discord usernames, or common typos in Column A, and map them to the official character name in Column B.",
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } else {
-    SpreadsheetApp.getUi().alert(
-      "Aliases Tab Exists",
-      "'Aliases' tab already exists.\n\nColumn A: Alias_Or_Alt_Name\nColumn B: Roster_Character_Name",
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    created = true;
   }
+  sheet.getRange(1, 1, 1, 3).setValues([["Alias_Or_Alt_Name", "Roster_Character_Name", "Type"]]).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidth(2, 220);
+  sheet.setColumnWidth(3, 140);
+
+  var typeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["Alt", "Alias"], true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 3, 300, 1).setDataValidation(typeRule);
+
+  SpreadsheetApp.getUi().alert(
+    created ? "Aliases Tab Created" : "Aliases Tab Updated",
+    (created ? "Created 'Aliases' tab!\n\n" : "Updated 'Aliases' tab headers and dropdowns!\n\n") +
+      "• Column A: Alias_Or_Alt_Name (Alt character, nickname, or typo)\n" +
+      "• Column B: Roster_Character_Name (Main character on Roster_And_Rolls)\n" +
+      "• Column C: Type ('Alt' to link an Alt to a Main, or 'Alias' for name typos)",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
 }
 
 /**
@@ -180,15 +244,32 @@ function resolvePlayerName(rawName, roster, aliasMap) {
 }
 
 /**
- * Map all incoming SoftRes reservations to canonical roster members.
+ * Map all incoming SoftRes reservations to canonical roster members,
+ * and track which Mains had an Alt attend so their Main's rolls are protected.
  */
 function mapReservations(rawPlayers, roster, aliasMap) {
   var guildReservations = {};
   var pugsIgnored = [];
   var substitutions = [];
+  var altProtectedMains = {}; // { [mainName]: altName }
 
   Object.keys(rawPlayers).forEach(function (rawName) {
     var data = rawPlayers[rawName];
+    var normRaw = normName(rawName);
+
+    // Check if rawName is an explicit Alt in Aliases (Column C = "Alt") without a roster row yet
+    if (!roster[normRaw] && aliasMap && aliasMap._altTypes && aliasMap._altTypes[normRaw] && aliasMap[normRaw] && roster[aliasMap[normRaw]]) {
+      var mainTarget = aliasMap[normRaw];
+      altProtectedMains[mainTarget] = normRaw;
+      substitutions.push({
+        original: rawName,
+        resolved: mainTarget + " (protected via Alt " + normRaw + ")",
+        method: "alt_link",
+        items: data.items,
+      });
+      return;
+    }
+
     var res = resolvePlayerName(rawName, roster, aliasMap);
 
     if (res.isGuild) {
@@ -202,6 +283,14 @@ function mapReservations(rawPlayers, roster, aliasMap) {
       data.items.forEach(function (it) {
         guildReservations[canonical].items.push(it);
       });
+
+      // If this character is an Alt on Roster_And_Rolls, also protect their linked Main
+      if (roster[canonical] && isAltStatus(roster[canonical].status)) {
+        var linkedMain = getLinkedMain(canonical, roster, aliasMap);
+        if (linkedMain && linkedMain !== canonical) {
+          altProtectedMains[linkedMain] = canonical;
+        }
+      }
 
       if (res.method !== "exact") {
         substitutions.push({
@@ -223,6 +312,7 @@ function mapReservations(rawPlayers, roster, aliasMap) {
     guildReservations: guildReservations,
     pugsIgnored: pugsIgnored,
     substitutions: substitutions,
+    altProtectedMains: altProtectedMains,
   };
 }
 
@@ -370,8 +460,10 @@ function previewWeeklySoftReserves() {
   var guildRes = mapping.guildReservations;
   var pugs = mapping.pugsIgnored;
   var subs = mapping.substitutions;
+  var altProtected = mapping.altProtectedMains || {};
 
   var attendingCount = 0;
+  var protectedMainsList = [];
   var missingMembers = [];
   var willResetMembers = [];
 
@@ -379,7 +471,9 @@ function previewWeeklySoftReserves() {
     var prev = roster[name];
     if (guildRes[name]) {
       attendingCount++;
-    } else {
+    } else if (altProtected[name]) {
+      protectedMainsList.push(name + " (played on Alt: " + altProtected[name] + ")");
+    } else if (!isAltStatus(prev.status)) {
       if (prev.status !== "Benched") {
         missingMembers.push(name + " (misses: " + (prev.misses + 1) + ")");
         if (prev.misses + 1 >= MISS_THRESHOLD && (prev.rolls1 > 0 || prev.rolls2 > 0)) {
@@ -395,7 +489,15 @@ function previewWeeklySoftReserves() {
   var lines = [];
   lines.push("=== DRY RUN / PREVIEW REPORT ===");
   lines.push("");
-  lines.push("✓ Guild Members Present: " + attendingCount + " / " + Object.keys(roster).length);
+  lines.push("✓ Guild Characters Present: " + attendingCount + " / " + Object.keys(roster).length);
+
+  if (protectedMainsList.length > 0) {
+    lines.push("");
+    lines.push("🛡️ Mains Protected by Alt Attendance (" + protectedMainsList.length + "):");
+    protectedMainsList.forEach(function (m) {
+      lines.push("  • " + m + " — Main rolls preserved, 0 misses");
+    });
+  }
 
   if (subs.length > 0) {
     lines.push("");
@@ -443,10 +545,11 @@ function previewWeeklySoftReserves() {
  *
  * Steps:
  *   1. Parse CSV_Import.
- *   2. Map names via Aliases & accent stripping.
+ *   2. Map names via Aliases & accent stripping (and detect Alt -> Main protection).
  *   3. If unmatched names found, prompt officer for review.
  *   4. Update Roster_And_Rolls (increment / reset extra rolls, track misses).
- *   5. Write the Gargul addon string to Addon_Export!A1.
+ *   5. Auto-apply any won-items string in Addon_Export!A3.
+ *   6. Write the Gargul addon string to Addon_Export!A1.
  */
 function processWeeklySoftReserves() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -465,6 +568,7 @@ function processWeeklySoftReserves() {
   var thisWeek = mapping.guildReservations;
   var pugsIgnored = mapping.pugsIgnored.map(function (p) { return p.name; });
   var substitutions = mapping.substitutions;
+  var altProtectedMains = mapping.altProtectedMains || {};
 
   // ── 3. Prompt if unmatched names detected (Option 3 protection) ──
   if (pugsIgnored.length > 0) {
@@ -515,15 +619,23 @@ function processWeeklySoftReserves() {
       var rolls2 = calcExtraRolls(prev, 2, newItem2, status);
 
       writePlayerRow(rosterSheet, prev.row, name, status, newItem1, rolls1, newItem2, rolls2, misses, lastRaid);
+    } else if (altProtectedMains[name]) {
+      // Player played on their Alt this week: Main's items & rolls stay untouched, misses = 0
+      writePlayerRow(rosterSheet, prev.row, name, status,
+        prev.item1, prev.rolls1, prev.item2, prev.rolls2, 0, today);
+    } else if (isAltStatus(status) && !ALTS_ACCRUE_ROLLS) {
+      // Unattended Alt row when ALTS_ACCRUE_ROLLS is false: Alts always have 0 extra rolls
+      writePlayerRow(rosterSheet, prev.row, name, status,
+        prev.item1, 0, prev.item2, 0, 0, prev.lastRaid);
     } else {
       // Player NOT in this week's CSV.
       var newMisses = prev.misses + 1;
 
       // If benched (officer marks status as "Benched"), treat as attending.
       if (prev.status === "Benched") {
-        // Benched players keep their items, gain +1 roll each, and don't accumulate misses.
-        var benchRolls1 = prev.item1 ? prev.rolls1 + 1 : 0;
-        var benchRolls2 = prev.item2 ? prev.rolls2 + 1 : 0;
+        // Benched players keep their items, gain +1 roll each (capped at MAX_EXTRA_ROLLS), and don't accumulate misses.
+        var benchRolls1 = prev.item1 ? Math.min(prev.rolls1 + 1, MAX_EXTRA_ROLLS) : 0;
+        var benchRolls2 = prev.item2 ? Math.min(prev.rolls2 + 1, MAX_EXTRA_ROLLS) : 0;
         writePlayerRow(rosterSheet, prev.row, name, prev.status,
           prev.item1, benchRolls1, prev.item2, benchRolls2, 0, today);
       } else {
@@ -541,13 +653,28 @@ function processWeeklySoftReserves() {
     }
   });
 
-  // ── 5. Build and write the addon export string ──
+  // ── 6. Auto-apply any pending /rsr won string pasted in Addon_Export!A3 ──
+  var exportSheet = ss.getSheetByName("Addon_Export");
+  var wonAppliedCount = 0;
+  if (exportSheet) {
+    var pendingWon = (exportSheet.getRange("A3").getValue() || "").toString().trim();
+    if (pendingWon) {
+      var applied = applyWonItemsString(pendingWon, ss);
+      wonAppliedCount = applied.length;
+      exportSheet.getRange("A3").clearContent();
+    }
+  }
+
+  // ── 7. Build and write the addon export string ──
   writeAddonExport(ss);
 
-  // ── 6. Toast summary ──
+  // ── 8. Toast summary ──
   var msg = "Updated " + Object.keys(roster).length + " guild members.";
-  if (substitutions.length > 0) {
-    msg += " (" + substitutions.length + " alias/accent matches).";
+  if (Object.keys(altProtectedMains).length > 0) {
+    msg += " (" + Object.keys(altProtectedMains).length + " main(s) protected via Alt).";
+  }
+  if (wonAppliedCount > 0) {
+    msg += " Applied " + wonAppliedCount + " won item reset(s).";
   }
   if (pugsIgnored.length > 0) {
     msg += " Ignored " + pugsIgnored.length + " pug(s).";
@@ -557,15 +684,18 @@ function processWeeklySoftReserves() {
 
 /**
  * Calculate extra rolls for a single item slot.
+ * Alts accumulate 0 rolls unless ALTS_ACCRUE_ROLLS is enabled.
+ * Mains (and Alts when ALTS_ACCRUE_ROLLS is true) accumulate +1 when reserving the same item again, capped at MAX_EXTRA_ROLLS (100).
  *
  * @param {object|null} prev  Previous roster entry (null if new player).
  * @param {number}      slot  1 or 2.
  * @param {string}      newItem  The item name reserved this week (may be "").
- * @param {string}      status  Player's status (Member, Recruit, Alt, Pug).
+ * @param {string}      status  Player's status (Member, Recruit, Alt, Benched).
  * @return {number}     Extra rolls to store.
  */
 function calcExtraRolls(prev, slot, newItem, status) {
   if (!newItem) return 0; // No reservation → no extra rolls.
+  if (isAltStatus(status) && !ALTS_ACCRUE_ROLLS) return 0; // Alts only accrue rolls when ALTS_ACCRUE_ROLLS is enabled.
 
   var prevItem  = prev ? (slot === 1 ? prev.item1  : prev.item2)  : "";
   var prevRolls = prev ? (slot === 1 ? prev.rolls1 : prev.rolls2) : 0;
@@ -576,8 +706,8 @@ function calcExtraRolls(prev, slot, newItem, status) {
   }
 
   if (prevItem === newItem) {
-    // Same item reserved again — accumulate.
-    return prevRolls + 1;
+    // Same item reserved again — accumulate up to MAX_EXTRA_ROLLS.
+    return Math.min(prevRolls + 1, MAX_EXTRA_ROLLS);
   }
 
   // Different item (or first time) — start fresh.
@@ -592,6 +722,7 @@ function calcExtraRolls(prev, slot, newItem, status) {
  *
  * @param {string} playerName  The winning player's name.
  * @param {string} itemName    The item they won.
+ * @return {boolean}           True if a matching item slot was found and reset.
  */
 function markItemWon(playerName, itemName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -601,15 +732,107 @@ function markItemWon(playerName, itemName) {
   var name = normName(playerName);
   var item = normItem(itemName);
   var entry = roster[name];
-  if (!entry) return;
+  if (!entry) return false;
 
+  var reset = false;
   var targetLower = item.toLowerCase();
   if (entry.item1 && entry.item1.toLowerCase() === targetLower) {
     sheet.getRange(entry.row, COL.ITEM1 + 1, 1, 2).setValues([["", 0]]);
+    reset = true;
   }
   if (entry.item2 && entry.item2.toLowerCase() === targetLower) {
     sheet.getRange(entry.row, COL.ITEM2 + 1, 1, 2).setValues([["", 0]]);
+    reset = true;
   }
+  return reset;
+}
+
+/**
+ * Parse and apply an in-game won-items export string from `/rsr won`
+ * Format: "Player1:Item1;Player2:Item2;"
+ *
+ * @param {string} wonString
+ * @param {Spreadsheet} [ss]
+ * @return {Array<{player: string, item: string, matched: boolean}>}
+ */
+function applyWonItemsString(wonString, ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!sheet) throw new Error("Roster_And_Rolls tab not found.");
+
+  var roster = readRoster(sheet);
+  var aliasMap = readAliases(ss);
+  var results = [];
+
+  var clean = (wonString || "").toString().trim();
+  clean = clean.replace(/^\/?(?:gl\s+)?rsr\s+won\s*/i, "").trim();
+  if (!clean) return results;
+
+  var entries = clean.split(";");
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i].trim();
+    if (!entry) continue;
+
+    var colonIdx = entry.indexOf(":");
+    if (colonIdx < 1) continue;
+
+    var rawPlayer = entry.slice(0, colonIdx).trim();
+    var rawItemsPart = entry.slice(colonIdx + 1).trim();
+    if (!rawPlayer || !rawItemsPart) continue;
+
+    var res = resolvePlayerName(rawPlayer, roster, aliasMap);
+    var canonical = res.resolvedName || normName(rawPlayer);
+
+    var itemNames = rawItemsPart.split(",");
+    for (var j = 0; j < itemNames.length; j++) {
+      var cleanItem = normItem(itemNames[j].replace(/=\s*\d+$/, ""));
+      if (!cleanItem) continue;
+      var matched = markItemWon(canonical, cleanItem);
+      results.push({ player: canonical, item: cleanItem, matched: matched });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Interactive dialog to paste the `/rsr won` string from Gargul and automatically reset all won items.
+ */
+function importWonItemsDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var resp = ui.prompt(
+    "📥 Import Won Items String (From /rsr won)",
+    "Run '/rsr won' in-game after your raid and paste the exported string below\n(Format: Player1:Item1;Player2:Item2;):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var raw = resp.getResponseText().trim();
+  if (!raw) return;
+
+  var results = applyWonItemsString(raw, ss);
+  writeAddonExport(ss);
+
+  if (results.length === 0) {
+    ui.alert("Invalid Format", "No valid 'Player:Item;' entries were found in the pasted string.", ui.ButtonSet.OK);
+    return;
+  }
+
+  var lines = ["Processed " + results.length + " won item entry/entries:"];
+  lines.push("");
+  results.forEach(function (r) {
+    if (r.matched) {
+      lines.push("✓ " + r.player + " — '" + r.item + "' cleared & reset to 0");
+    } else {
+      lines.push("ℹ️ " + r.player + " — '" + r.item + "' (no active slot matched)");
+    }
+  });
+  lines.push("");
+  lines.push("Addon_Export!A1 has been refreshed.");
+
+  ui.alert("🏆 Won Items Imported", lines.join("\n"), ui.ButtonSet.OK);
 }
 
 /**
@@ -917,10 +1140,11 @@ function formatAndCleanRoster() {
 /**
  * Build the Gargul addon import string and write it to Addon_Export!A1.
  *
- * Format: PlayerName:Item1=Rolls,Item2=Rolls;PlayerName:Item1=Rolls;
+ * Format: PlayerName:Item1=Rolls,Item2=Rolls;AltName*alt:Item1=0;
  *
  * Recruits still in their trial period have their available extra rolls
  * exported as 0 (they accumulate internally but can't spend them yet).
+ * Alts are exported with the "*alt" suffix and 0 extra rolls.
  */
 function writeAddonExport(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
@@ -936,34 +1160,263 @@ function writeAddonExport(ss) {
   Object.keys(roster).forEach(function (name) {
     var e = roster[name];
 
-    // Skip players with no active reservations.
-    if (!e.item1 && !e.item2) return;
-
     // The addon treats everyone in this string as guild, so Pugs are left out.
     if (e.status === "Pug") return;
 
-    // Determine if this player is a recruit still in trial.
+    var isAlt = isAltStatus(e.status);
+
+    // Skip non-alt players with no active reservations.
+    // Alts are always exported (even with empty items) so Gargul recognizes them as Guild Alts in Phase 1.
+    if (!isAlt && !e.item1 && !e.item2) return;
+
     var recruitInTrial = isRecruitInTrial(e);
 
     var items = [];
     if (e.item1) {
-      var r1 = recruitInTrial ? 0 : e.rolls1;
+      var r1 = ((isAlt && !ALTS_ACCRUE_ROLLS) || recruitInTrial) ? 0 : Math.min(e.rolls1, MAX_EXTRA_ROLLS);
       items.push(e.item1 + "=" + r1);
     }
     if (e.item2) {
-      var r2 = recruitInTrial ? 0 : e.rolls2;
+      var r2 = ((isAlt && !ALTS_ACCRUE_ROLLS) || recruitInTrial) ? 0 : Math.min(e.rolls2, MAX_EXTRA_ROLLS);
       items.push(e.item2 + "=" + r2);
     }
 
-    if (items.length > 0) {
-      parts.push(name + ":" + items.join(","));
+    var tag = isAlt ? "*alt" : "";
+    if (items.length > 0 || isAlt) {
+      parts.push(name + tag + ":" + items.join(","));
     }
   });
 
   var output = parts.join(";");
   if (output) output += ";";
 
+  exportSheet.getRange("A1").clearFormat();
   exportSheet.getRange("A1").setValue(output);
+  return output;
+}
+
+/**
+ * Show the generated Addon_Export string in a dialog for instant copying.
+ */
+function showExportStringDialog() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var output = writeAddonExport(ss);
+  var ui = SpreadsheetApp.getUi();
+
+  if (!output) {
+    ui.alert("Addon Export Empty", "No active guild reservations found on Roster_And_Rolls yet.", ui.ButtonSet.OK);
+    return;
+  }
+
+  ui.alert(
+    "📋 Copy Addon Export String",
+    "Copy the string below (or from Addon_Export!A1) and run in-game:\n\n/rsr " + output,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Generate a ready-to-paste Discord summary of active bonus roll streaks.
+ */
+function generateDiscordSummary() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!sheet) throw new Error("Roster_And_Rolls tab not found.");
+
+  var roster = readRoster(sheet);
+  var lines = [];
+  lines.push("**🎲 Rolling SR — Weekly Bonus Rolls Summary (" + todayStamp() + ")**");
+  lines.push("```");
+
+  var names = Object.keys(roster).sort();
+  var activeCount = 0;
+
+  names.forEach(function (name) {
+    var e = roster[name];
+    if (!e.item1 && !e.item2) return;
+    if (e.status === "Pug") return;
+
+    var isAlt = isAltStatus(e.status);
+    var inTrial = isRecruitInTrial(e);
+    var items = [];
+    if (e.item1) {
+      var r1 = (isAlt && !ALTS_ACCRUE_ROLLS) ? "0 [Alt]" : (inTrial ? "0 [Trial]" : "+" + Math.min(e.rolls1, MAX_EXTRA_ROLLS));
+      items.push(e.item1 + " (" + r1 + ")");
+    }
+    if (e.item2) {
+      var r2 = (isAlt && !ALTS_ACCRUE_ROLLS) ? "0 [Alt]" : (inTrial ? "0 [Trial]" : "+" + Math.min(e.rolls2, MAX_EXTRA_ROLLS));
+      items.push(e.item2 + " (" + r2 + ")");
+    }
+    var roleTag = isAlt ? " [Alt]" : "";
+    var missTag = ((!isAlt || ALTS_ACCRUE_ROLLS) && e.misses === 1) ? " ⚠️ [1 Miss]" : "";
+    lines.push(name + roleTag + ": " + items.join(", ") + missTag);
+    activeCount++;
+  });
+
+  if (activeCount === 0) {
+    lines.push("No active soft reserves recorded yet.");
+  }
+  lines.push("```");
+
+  ui.alert("📢 Discord Summary (Copy & Paste to Discord)", lines.join("\n"), ui.ButtonSet.OK);
+}
+
+/**
+ * One-click initialization/repair of all required tabs, headers, dropdowns, and Addon_Export!A1.
+ */
+function setupAllTabs() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // 1. Roster_And_Rolls
+  var rosterSheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!rosterSheet) {
+    rosterSheet = ss.insertSheet("Roster_And_Rolls");
+  }
+  var rosterHeaders = [[
+    "PlayerName", "Status", "Item_1_Name", "Item_1_ExtraRolls",
+    "Item_2_Name", "Item_2_ExtraRolls", "Consecutive_Misses", "Last_Raid_Date",
+  ]];
+  rosterSheet.getRange(1, 1, 1, 8).setValues(rosterHeaders).setFontWeight("bold");
+  rosterSheet.setFrozenRows(1);
+
+  // Add dropdown data validation for Status column (rows 2..300)
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["Member", "Recruit", "Alt", "Benched"], true)
+    .setAllowInvalid(true)
+    .build();
+  rosterSheet.getRange(2, 2, 300, 1).setDataValidation(statusRule);
+
+  // 2. CSV_Import
+  var csvSheet = ss.getSheetByName("CSV_Import");
+  if (!csvSheet) {
+    csvSheet = ss.insertSheet("CSV_Import");
+  }
+  csvSheet.getRange(1, 1, 1, 6).setValues([["Name", "Class", "ItemId", "ItemName", "Note", "Plus"]]).setFontWeight("bold");
+  csvSheet.setFrozenRows(1);
+
+  // 3. Addon_Export (clear any accidental formula like #NAME? in A1)
+  var exportSheet = ss.getSheetByName("Addon_Export");
+  if (!exportSheet) {
+    exportSheet = ss.insertSheet("Addon_Export");
+  }
+  var a1Formula = exportSheet.getRange("A1").getFormula();
+  if (a1Formula) {
+    exportSheet.getRange("A1").clearContent();
+  }
+  exportSheet.getRange("A2").setValue("Optional — Paste '/rsr won' string in A3 below to auto-apply on Weekly Commit:").setFontWeight("bold");
+  writeAddonExport(ss);
+
+  // 4. Aliases
+  var aliasSheet = ss.getSheetByName("Aliases");
+  if (!aliasSheet) {
+    aliasSheet = ss.insertSheet("Aliases");
+  }
+  aliasSheet.getRange(1, 1, 1, 3).setValues([["Alias_Or_Alt_Name", "Roster_Character_Name", "Type"]]).setFontWeight("bold");
+  aliasSheet.setFrozenRows(1);
+  aliasSheet.setColumnWidth(1, 220);
+  aliasSheet.setColumnWidth(2, 220);
+  aliasSheet.setColumnWidth(3, 140);
+
+  var aliasTypeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["Alt", "Alias"], true)
+    .setAllowInvalid(true)
+    .build();
+  aliasSheet.getRange(2, 3, 300, 1).setDataValidation(aliasTypeRule);
+
+  ui.alert(
+    "🚀 Sheet Setup & Repair Complete",
+    "Verified and configured all 4 tabs:\n" +
+      "• Roster_And_Rolls (with Status dropdowns)\n" +
+      "• CSV_Import\n" +
+      "• Addon_Export (cleared any formula errors in A1)\n" +
+      "• Aliases (with Alt / Alias dropdowns)",
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Interactive dialog to register an Alt character and link it to its Main on Roster_And_Rolls and Aliases.
+ */
+function linkAltDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rosterSheet = ss.getSheetByName("Roster_And_Rolls");
+  if (!rosterSheet) {
+    setupAllTabs();
+    rosterSheet = ss.getSheetByName("Roster_And_Rolls");
+  }
+
+  var altResp = ui.prompt(
+    "🔗 Register / Link Alt to Main (Step 1 of 2)",
+    "Enter the Alt character's in-game name:",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (altResp.getSelectedButton() !== ui.Button.OK) return;
+  var altName = normName(altResp.getResponseText());
+  if (!altName) return;
+
+  var mainResp = ui.prompt(
+    "🔗 Register / Link Alt to Main (Step 2 of 2)",
+    "Enter the Main character's name on Roster_And_Rolls that '" + altName + "' belongs to:",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (mainResp.getSelectedButton() !== ui.Button.OK) return;
+  var mainName = normName(mainResp.getResponseText());
+  if (!mainName) return;
+
+  var roster = readRoster(rosterSheet);
+  var statusValue = "Alt (" + mainName + ")";
+
+  // 1. Add or update the Alt row on Roster_And_Rolls
+  if (roster[altName]) {
+    var existing = roster[altName];
+    writePlayerRow(
+      rosterSheet, existing.row, altName, statusValue,
+      existing.item1, 0, existing.item2, 0, 0, existing.lastRaid
+    );
+  } else {
+    var nextRow = Math.max(rosterSheet.getLastRow() + 1, 2);
+    writePlayerRow(rosterSheet, nextRow, altName, statusValue, "", 0, "", 0, 0, "");
+  }
+
+  // 2. Add or update the mapping on Aliases tab
+  var aliasSheet = ss.getSheetByName("Aliases");
+  if (!aliasSheet) {
+    aliasSheet = ss.insertSheet("Aliases");
+    aliasSheet.getRange(1, 1, 1, 3).setValues([["Alias_Or_Alt_Name", "Roster_Character_Name", "Type"]]).setFontWeight("bold");
+    aliasSheet.setFrozenRows(1);
+  }
+
+  var aliasData = aliasSheet.getDataRange().getValues();
+  var updatedAliasRow = false;
+  for (var r = 1; r < aliasData.length; r++) {
+    if (normName(aliasData[r][0]) === altName) {
+      aliasSheet.getRange(r + 1, 1, 1, 3).setValues([[altName, mainName, "Alt"]]);
+      updatedAliasRow = true;
+      break;
+    }
+  }
+  if (!updatedAliasRow) {
+    var nextAliasRow = Math.max(aliasSheet.getLastRow() + 1, 2);
+    aliasSheet.getRange(nextAliasRow, 1, 1, 3).setValues([[altName, mainName, "Alt"]]);
+  }
+
+  writeAddonExport(ss);
+
+  var mainNote = roster[mainName]
+    ? "✓ Main '" + mainName + "' found on Roster_And_Rolls."
+    : "⚠️ Note: '" + mainName + "' is not on Roster_And_Rolls yet — remember to add the Main row too!";
+
+  ui.alert(
+    "🔗 Alt Linked to Main",
+    "Successfully linked Alt '" + altName + "' → Main '" + mainName + "':\n\n" +
+      "• Roster_And_Rolls: " + altName + " set to Status '" + statusValue + "' (0 extra rolls)\n" +
+      "• Aliases: " + altName + " | " + mainName + " | Alt\n" +
+      "• " + mainNote,
+    ui.ButtonSet.OK
+  );
 }
 
 /**
@@ -1001,12 +1454,17 @@ function onOpen() {
     .createMenu("Rolling SR")
     .addItem("🔍 Preview & Review (Dry Run)", "previewWeeklySoftReserves")
     .addItem("⚡ Process Weekly SRs (Commit)", "processWeeklySoftReserves")
+    .addItem("📋 View / Copy Addon String", "showExportStringDialog")
     .addSeparator()
-    .addItem("🏆 Mark Item Won", "markItemWonDialog")
+    .addItem("📥 Import Won Items String (/rsr won)", "importWonItemsDialog")
+    .addItem("🏆 Mark Item Won (Manual)", "markItemWonDialog")
+    .addItem("🔗 Register / Link Alt to Main", "linkAltDialog")
     .addItem("🌴 Excuse Absence / Vacation", "excuseAbsenceDialog")
     .addItem("🎓 Check Recruit Graduation", "checkRecruitGraduation")
     .addItem("📊 Streak Leaderboard & Stats", "showLeaderboardAndStats")
+    .addItem("📢 Generate Discord Summary", "generateDiscordSummary")
     .addSeparator()
+    .addItem("🚀 Initialize / Repair Sheet Tabs", "setupAllTabs")
     .addItem("📦 Create Backup Snapshot", "createRosterSnapshot")
     .addItem("🧹 Clean & Sort Roster", "formatAndCleanRoster")
     .addItem("📋 Setup Aliases Tab", "setupAliasesTab")

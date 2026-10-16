@@ -14,6 +14,18 @@ local RollingSR = {
     -- { [lowercasePlayerName] = { [lowercaseItemName] = extraRolls, }, }
     ExtraRolls = {},
 
+    -- { [lowercasePlayerName] = true, }
+    Alts = {},
+
+    -- { { player = "Thrall", item = "Deathbringer's Will", }, }
+    AwardedItems = {},
+
+    -- Configurable cap on accumulated bonus rolls per item
+    maxExtraRolls = 100,
+
+    -- Configurable toggle for whether Alts can accrue and use stacking bonus rolls (default false)
+    altsAccrueRolls = false,
+
     phase = PHASE_NONE,
 
     -- Phase 1 tie-break round (0 = regular Phase 1 rolls)
@@ -53,6 +65,10 @@ function RollingSR:_init()
 
     -- Restore saved extra rolls across /reload or relog
     self.ExtraRolls = GL.DB:get("RollingSR.ExtraRolls", {}) or {};
+    self.Alts = GL.DB:get("RollingSR.Alts", {}) or {};
+    self.AwardedItems = GL.DB:get("RollingSR.AwardedItems", {}) or {};
+    self.maxExtraRolls = tonumber(GL.DB:get("RollingSR.maxExtraRolls", 100)) or 100;
+    self.altsAccrueRolls = GL.DB:get("RollingSR.altsAccrueRolls", false) == true;
     self.rawImportString = GL.DB:get("RollingSR.rawImportString", "") or "";
 
     GL.Events:register("RollingSRRollOffStarted", "GL.ROLLOFF_STARTED", function ()
@@ -80,10 +96,16 @@ function RollingSR:_init()
         end
     end);
 
+    GL.Events:register("RollingSRWhisperListener", "CHAT_MSG_WHISPER", function (_, message, sender)
+        if (self:hasData() and (not GL.User or not GL.User.isInGroup or GL.User.isMasterLooter or GL.User.hasAssist)) then
+            self:handleWhisperCommand(message, sender);
+        end
+    end);
+
     self._initialized = true;
 end
 
---- Parse "Player:Item=Rolls,Item=Rolls;Player:Item=Rolls;" into ExtraRolls
+--- Parse "Player:Item=Rolls,Item=Rolls;AltPlayer*alt:Item=0;" into ExtraRolls and Alts
 ---
 ---@param data string
 ---@return boolean
@@ -93,28 +115,48 @@ function RollingSR:parseImportString(data)
     end
 
     local Parsed = {};
+    local ParsedAlts = {};
+    local cap = tonumber(self.maxExtraRolls) or 100;
 
     for entry in data:gmatch("[^;]+") do
-        local playerName, itemList = strtrim(entry):match("^([^:]+):(.+)$");
+        local rawPlayer, itemList = strtrim(entry):match("^([^:]+):(.*)$");
 
-        if (playerName and itemList) then
+        if (rawPlayer and itemList ~= nil) then
+            rawPlayer = strtrim(rawPlayer);
+            itemList = strtrim(itemList);
+
+            local isAlt = false;
+            local altBase = rawPlayer:match("^(.-)%*[aA][lL][tT]$") or rawPlayer:match("^(.-)%s*%([aA][lL][tT]%)$");
+            if (altBase) then
+                rawPlayer = strtrim(altBase);
+                isAlt = true;
+            end
+
+            local playerName = normalizeName(rawPlayer);
             local Items = {};
 
-            for itemEntry in itemList:gmatch("[^,]+") do
-                local itemName, rolls = strtrim(itemEntry):match("^(.+)=%s*(%d+)$");
+            if (itemList ~= "") then
+                for itemEntry in itemList:gmatch("[^,]+") do
+                    local itemName, rolls = strtrim(itemEntry):match("^(.+)=%s*(%d+)$");
 
-                if (itemName and rolls) then
-                    Items[normalizeItem(itemName)] = tonumber(rolls) or 0;
+                    if (itemName and rolls) then
+                        local count = math.min(tonumber(rolls) or 0, cap);
+                        Items[normalizeItem(itemName)] = count;
+                    end
                 end
             end
 
-            if (next(Items)) then
-                Parsed[normalizeName(strtrim(playerName))] = Items;
+            if (playerName ~= "" and (next(Items) or itemList == "")) then
+                Parsed[playerName] = Items;
+                if (isAlt) then
+                    ParsedAlts[playerName] = true;
+                end
             end
         end
     end
 
     self.ExtraRolls = Parsed;
+    self.Alts = ParsedAlts;
     self.rawImportString = data;
     self:persist();
 
@@ -135,7 +177,7 @@ function RollingSR:hasData()
     return not GL:empty(self.ExtraRolls);
 end
 
---- Does any guild player have this item in the imported string?
+--- Does any guild player have this item in the imported string or SoftRes?
 ---
 ---@param itemLinkOrName string
 ---@return boolean
@@ -152,15 +194,39 @@ function RollingSR:tracksItem(itemLinkOrName)
         end
     end
 
+    if (GL.SoftRes and GL.SoftRes:available() and GL.SoftRes.byItemLink) then
+        for _, srName in pairs(GL.SoftRes:byItemLink(itemLinkOrName) or {}) do
+            if (self:isGuildPlayer(srName)) then
+                return true;
+            end
+        end
+    end
+
     return false;
 end
 
---- Guild players (Members/Recruits) are the ones present in the imported string
+--- Guild players (Mains and Alts) are the ones present in the imported string
 ---
 ---@param playerName string
 ---@return boolean
 function RollingSR:isGuildPlayer(playerName)
     return self.ExtraRolls[normalizeName(playerName)] ~= nil;
+end
+
+--- Check whether a guild player is flagged as an Alt
+---
+---@param playerName string
+---@return boolean
+function RollingSR:isAlt(playerName)
+    return (self.Alts and self.Alts[normalizeName(playerName)]) == true;
+end
+
+--- Check whether a player is a Guild Main (Member or Recruit, not Alt or Pug)
+---
+---@param playerName string
+---@return boolean
+function RollingSR:isMain(playerName)
+    return self:isGuildPlayer(playerName) and not self:isAlt(playerName);
 end
 
 ---@param playerName string
@@ -176,23 +242,88 @@ function RollingSR:reservedCurrentItem(playerName)
     return GL.SoftRes:itemIDIsReservedByPlayer(CurrentRollOff.itemID, playerName);
 end
 
+--- Did at least one Guild Main reserve the current roll-off item?
+---
+---@return boolean
+function RollingSR:anyMainReservedCurrentItem()
+    local CurrentRollOff = GL.RollOff.CurrentRollOff;
+    local normItem = normalizeItem(CurrentRollOff and CurrentRollOff.itemName or "");
+
+    for name, Items in pairs(self.ExtraRolls or {}) do
+        if (not self:isAlt(name) and Items[normItem] ~= nil) then
+            return true;
+        end
+    end
+
+    if (GL.SoftRes and GL.SoftRes:available() and CurrentRollOff and CurrentRollOff.itemID and GL.SoftRes.byItemID) then
+        for _, srName in pairs(GL.SoftRes:byItemID(CurrentRollOff.itemID) or {}) do
+            if (self:isMain(srName)) then
+                return true;
+            end
+        end
+    end
+
+    return false;
+end
+
+--- Did at least one Pug reserve the current roll-off item?
+---
+---@return boolean
+function RollingSR:anyPugReservedCurrentItem()
+    if (not (GL.SoftRes and GL.SoftRes:available())) then
+        return true;
+    end
+
+    local CurrentRollOff = GL.RollOff.CurrentRollOff;
+    local Reservists = {};
+    if (CurrentRollOff and CurrentRollOff.itemID and GL.SoftRes.byItemID) then
+        Reservists = GL.SoftRes:byItemID(CurrentRollOff.itemID) or {};
+    elseif (CurrentRollOff and CurrentRollOff.itemLink and GL.SoftRes.byItemLink) then
+        Reservists = GL.SoftRes:byItemLink(CurrentRollOff.itemLink) or {};
+    end
+
+    for _, srName in pairs(Reservists) do
+        if (not self:isGuildPlayer(srName)) then
+            return true;
+        end
+    end
+
+    return false;
+end
+
+--- Alts can never win gear over Mains; they are only Phase 2 eligible if no Main reserved the item
+---
 ---@param playerName string
 ---@return boolean
 function RollingSR:isPhase2Eligible(playerName)
-    return self:isGuildPlayer(playerName) and self:reservedCurrentItem(playerName);
+    if (not self:isGuildPlayer(playerName) or not self:reservedCurrentItem(playerName)) then
+        return false;
+    end
+
+    if (self:isAlt(playerName) and self:anyMainReservedCurrentItem()) then
+        return false;
+    end
+
+    return true;
 end
 
 ---@param playerName string
 ---@param itemName string
 ---@return number
 function RollingSR:getExtraRolls(playerName, itemName)
+    if (self:isAlt(playerName) and not self.altsAccrueRolls) then
+        return 0;
+    end
+
     local Items = self.ExtraRolls[normalizeName(playerName)];
 
     if (not Items) then
         return 0;
     end
 
-    return Items[normalizeItem(itemName)] or 0;
+    local raw = Items[normalizeItem(itemName)] or 0;
+    local cap = tonumber(self.maxExtraRolls) or 100;
+    return math.min(raw, cap);
 end
 
 --- Phase 2 allows 1 + ExtraRolls rolls
@@ -253,6 +384,11 @@ function RollingSR:acceptRoll(Roll)
             end
         else
             if (GL.SoftRes:available() and not self:reservedCurrentItem(playerName)) then
+                return false;
+            end
+
+            -- Alts participate in Phase 1 only when Pugs are present (or no Mains reserved the item)
+            if (self:isAlt(playerName) and self:anyMainReservedCurrentItem() and not self:anyPugReservedCurrentItem()) then
                 return false;
             end
         end
@@ -495,12 +631,16 @@ end
 ---@return nil
 function RollingSR:persist()
     GL.DB:set("RollingSR.ExtraRolls", self.ExtraRolls);
+    GL.DB:set("RollingSR.Alts", self.Alts);
+    GL.DB:set("RollingSR.AwardedItems", self.AwardedItems);
+    GL.DB:set("RollingSR.maxExtraRolls", self.maxExtraRolls);
+    GL.DB:set("RollingSR.altsAccrueRolls", self.altsAccrueRolls);
     if (self.rawImportString) then
         GL.DB:set("RollingSR.rawImportString", self.rawImportString);
     end
 end
 
---- Reset extra rolls to 0 for a player who won the item
+--- Reset extra rolls to 0 for a player who won the item and record in AwardedItems
 ---
 ---@param winner string
 ---@param itemLinkOrID string|number
@@ -512,12 +652,35 @@ function RollingSR:onItemAwarded(winner, itemLinkOrID)
         return;
     end
 
-    local itemName = normalizeItem(GL:getItemNameFromLink(itemLinkOrID) or itemLinkOrID);
+    local rawItemName = GL:getItemNameFromLink(itemLinkOrID) or tostring(itemLinkOrID or "");
+    rawItemName = strtrim(tostring(rawItemName):match("%[(.-)%]") or tostring(rawItemName));
+    local itemName = normalizeItem(rawItemName);
 
-    if (self.ExtraRolls[name][itemName]) then
+    local hadItem = (self.ExtraRolls[name][itemName] ~= nil);
+    if (hadItem) then
         self.ExtraRolls[name][itemName] = 0;
-        self:persist();
+    end
 
+    if (hadItem or (GL.SoftRes and GL.SoftRes:available())) then
+        self.AwardedItems = self.AwardedItems or {};
+        local exists = false;
+        for _, entry in ipairs(self.AwardedItems) do
+            if (normalizeName(entry.player) == name and normalizeItem(entry.item) == itemName) then
+                exists = true;
+                break;
+            end
+        end
+        if (not exists and rawItemName ~= "") then
+            tinsert(self.AwardedItems, {
+                player = GL:capitalize(name),
+                item = rawItemName,
+            });
+        end
+    end
+
+    self:persist();
+
+    if (hadItem) then
         local itemDisplay = tostring(itemLinkOrID or itemName);
         if (type(itemLinkOrID) == "number" and GetItemInfo) then
             local _, link = GetItemInfo(itemLinkOrID);
@@ -526,16 +689,58 @@ function RollingSR:onItemAwarded(winner, itemLinkOrID)
             end
         end
 
-        GL:success(("[Rolling SR] %s awarded to %s. Extra rolls reset to 0."):format(
+        GL:success(("[Rolling SR] %s awarded to %s. Extra rolls reset to 0. (Type /rsr won after raid to export won items)"):format(
             itemDisplay,
             GL:capitalize(winner)
         ));
     end
 end
 
+--- Build the compact won-items export string for Google Sheets
+--- Format: Player1:Item1;Player2:Item2;
+---
+---@return string
+function RollingSR:getAwardExportString()
+    local Parts = {};
+    for _, entry in ipairs(self.AwardedItems or {}) do
+        if (entry.player and entry.item) then
+            tinsert(Parts, ("%s:%s"):format(entry.player, entry.item));
+        end
+    end
+    if (#Parts == 0) then
+        return "";
+    end
+    return table.concat(Parts, ";") .. ";";
+end
+
+--- Display and open a copyable dialog with the won-items export string
+---
+---@return string
+function RollingSR:showAwardExport()
+    local exportStr = self:getAwardExportString();
+    if (exportStr == "") then
+        GL:warning("[Rolling SR] No won items recorded in this session yet.");
+        return "";
+    end
+
+    GL:success("[Rolling SR] Won Items Export String (paste into Google Sheet 'Rolling SR > Import Won Items String'):");
+    GL:message("  " .. exportStr);
+
+    if (GL.Interface and GL.Interface.Dialogs and GL.Interface.Dialogs.HyperlinkDialog and GL.Interface.Dialogs.HyperlinkDialog.open) then
+        GL.Interface.Dialogs.HyperlinkDialog:open({
+            description = "Copy this won-items export string and paste it into your Google Sheet via 'Rolling SR > Import Won Items String' (or into Addon_Export!A3):",
+            hyperlink = exportStr,
+        });
+    end
+
+    return exportStr;
+end
+
 ---@return nil
 function RollingSR:clear()
     self.ExtraRolls = {};
+    self.Alts = {};
+    self.AwardedItems = {};
     self.rawImportString = "";
     self:resetPhase();
     self:persist();
@@ -592,8 +797,8 @@ function RollingSR:getStatusText(itemLinkOrName)
         local normalizedItem = normalizeItem(itemLinkOrName);
 
         for name, items in pairs(self.ExtraRolls) do
-            if (items[normalizedItem] ~= nil) then
-                local allowed = 1 + (items[normalizedItem] or 0);
+            if (self:isPhase2Eligible(name) and items[normalizedItem] ~= nil) then
+                local allowed = self:allowedPhase2Rolls(name, itemLinkOrName);
                 totalAllowed = totalAllowed + allowed;
                 local used = self.RollCounts[name] or 0;
                 totalCast = totalCast + math.min(used, allowed);
@@ -623,6 +828,10 @@ function RollingSR:broadcast(channel)
         return;
     end
 
+    if (not GL.CommMessage or not GL.CommMessage.new) then
+        return;
+    end
+
     local payload = self.rawImportString;
     if (GL:empty(payload)) then
         local Entries = {};
@@ -631,16 +840,15 @@ function RollingSR:broadcast(channel)
             for item, rolls in pairs(items) do
                 tinsert(ItemPairs, ("%s=%d"):format(item, rolls));
             end
-            if (#ItemPairs > 0) then
-                tinsert(Entries, ("%s:%s"):format(GL:capitalize(name), table.concat(ItemPairs, ",")));
-            end
+            local tag = self:isAlt(name) and "*alt" or "";
+            tinsert(Entries, ("%s%s:%s"):format(GL:capitalize(name), tag, table.concat(ItemPairs, ",")));
         end
         payload = table.concat(Entries, ";") .. ";";
     end
 
     local targetChannel = channel;
     if (not targetChannel or targetChannel == "") then
-        targetChannel = GL.User.isInGroup and "GROUP" or "GUILD";
+        targetChannel = (GL.User and GL.User.isInGroup) and "GROUP" or "GUILD";
     end
 
     GL.CommMessage.new({
@@ -671,7 +879,120 @@ function RollingSR:receiveBroadcast(Message)
     end
 end
 
---- Handle "/gl rsr <args>" slash command
+--- Reply to !rsr or !rolls whispers with the sender's bonus roll counts
+---
+---@param message string
+---@param sender string
+---@return nil
+function RollingSR:handleWhisperCommand(message, sender)
+    local msg = strlower(strtrim(tostring(message or "")));
+    if (msg ~= "!rsr" and msg ~= "!rolls" and msg ~= "!rollingsr") then
+        return;
+    end
+
+    local name = normalizeName(sender);
+    local Items = self.ExtraRolls[name];
+
+    if (not Items) then
+        GL:sendChatMessage(
+            "[Rolling SR] No stored bonus rolls found for your character.",
+            "WHISPER", nil, sender
+        );
+        return;
+    end
+
+    if (self:isAlt(name)) then
+        if (not self.altsAccrueRolls or GL:empty(Items)) then
+            GL:sendChatMessage(
+                "[Rolling SR] Your character is registered as a Guild Alt (+0 bonus rolls; eligible in Phase 1 vs Pugs).",
+                "WHISPER", nil, sender
+            );
+            return;
+        end
+
+        local AltParts = {};
+        for item in pairs(Items) do
+            local rolls = self:getExtraRolls(name, item);
+            tinsert(AltParts, ("%s (Alt +%d bonus, %d Phase 2 rolls if no Main reserved)"):format(item, rolls, 1 + rolls));
+        end
+        table.sort(AltParts);
+        GL:sendChatMessage(
+            ("[Rolling SR] Your Alt reserves: %s"):format(table.concat(AltParts, ", ")),
+            "WHISPER", nil, sender
+        );
+        return;
+    end
+
+    if (GL:empty(Items)) then
+        GL:sendChatMessage(
+            "[Rolling SR] Registered as Guild Main (+0 stored bonus rolls).",
+            "WHISPER", nil, sender
+        );
+        return;
+    end
+
+    local Parts = {};
+    for item in pairs(Items) do
+        local rolls = self:getExtraRolls(name, item);
+        tinsert(Parts, ("%s (+%d bonus, %d Phase 2 rolls)"):format(item, rolls, 1 + rolls));
+    end
+    table.sort(Parts);
+
+    GL:sendChatMessage(
+        ("[Rolling SR] Your reserves: %s"):format(table.concat(Parts, ", ")),
+        "WHISPER", nil, sender
+    );
+end
+
+--- Print stored bonus rolls for one player or all loaded players
+---
+---@param targetName? string
+---@return nil
+function RollingSR:printPlayerRolls(targetName)
+    if (not self:hasData()) then
+        GL:warning("[Rolling SR] No extra rolls data loaded.");
+        return;
+    end
+
+    if (targetName and targetName ~= "") then
+        local key = normalizeName(targetName);
+        local Items = self.ExtraRolls[key];
+        if (not Items) then
+            GL:warning(("[Rolling SR] %s is not in the guild bonus roll table (treated as Pug)."):format(GL:capitalize(key)));
+            return;
+        end
+        local roleTag = self:isAlt(key) and " [Alt]" or "";
+        local Parts = {};
+        for item in pairs(Items) do
+            tinsert(Parts, ("%s (+%d)"):format(item, self:getExtraRolls(key, item)));
+        end
+        table.sort(Parts);
+        local summary = #Parts > 0 and table.concat(Parts, ", ") or "(no active items)";
+        GL:message(("[Rolling SR] %s%s: %s"):format(GL:capitalize(key), roleTag, summary));
+        return;
+    end
+
+    local Names = {};
+    for name in pairs(self.ExtraRolls) do
+        tinsert(Names, name);
+    end
+    table.sort(Names);
+
+    local altMode = self.altsAccrueRolls and "ON" or "OFF";
+    GL:message(("[Rolling SR] Loaded players (%d, max cap: %d, alt bonus rolls: %s):"):format(#Names, self.maxExtraRolls or 100, altMode));
+    for _, name in ipairs(Names) do
+        local roleTag = self:isAlt(name) and " [Alt]" or "";
+        local Parts = {};
+        for item in pairs(self.ExtraRolls[name]) do
+            tinsert(Parts, ("%s (+%d)"):format(item, self:getExtraRolls(name, item)));
+        end
+        table.sort(Parts);
+        local summary = #Parts > 0 and table.concat(Parts, ", ") or "(no active items)";
+        GL:message(("  %s%s: %s"):format(GL:capitalize(name), roleTag, summary));
+    end
+end
+
+--- Handle "/rsr <args>" (or "/gl rsr <args>") slash command
 ---
 ---@param argumentString string
 ---@return nil
@@ -679,17 +1000,73 @@ function RollingSR:handleCommand(argumentString)
     local arg = strtrim(argumentString or "");
 
     if (arg == "") then
-        GL:message(("[Rolling SR] Tracking bonus rolls for %d players."):format(self:countPlayers()));
-        GL:message("Commands:");
-        GL:message("  /gl rsr test           - Enable solo test mode (loads sample data, no sheet needed!)");
-        GL:message("  /gl rsr sim [tie]      - Simulate other players' rolls during test roll-off");
-        GL:message("  /gl rsr <string>       - Import extra rolls string");
-        GL:message("  /gl rsr broadcast      - Broadcast data to raid group or guild");
-        GL:message("  /gl rsr clear          - Clear all extra rolls data");
+        local altMode = self.altsAccrueRolls and "ON" or "OFF";
+        GL:message(("[Rolling SR] Tracking %d guild players (max cap: %d, alt rolls: %s)."):format(self:countPlayers(), self.maxExtraRolls or 100, altMode));
+        GL:message("Commands (all 1-2 words):");
+        GL:message("  /rsr <string>    - Import Addon_Export string & auto-broadcast");
+        GL:message("  /rsr list        - List all loaded guild Mains, Alts & bonus rolls");
+        GL:message("  /rsr <player>    - Check bonus rolls for a player (e.g. /rsr Thrall)");
+        GL:message("  /rsr won         - Export won items string for Google Sheets");
+        GL:message("  /rsr sync        - Broadcast data to raid or guild");
+        GL:message("  /rsr max <num>   - View or set max accumulated rolls cap (default 100)");
+        GL:message("  /rsr altrolls    - Toggle whether Alts can accrue/spend bonus rolls");
+        GL:message("  /rsr test        - Enable solo test mode (no sheet needed!)");
+        GL:message("  /rsr sim         - Simulate rolls (/rsr tie, /rsr simpug, /rsr simalt, /rsr simwon)");
+        GL:message("  /rsr clear       - Clear all Rolling SR data");
         return;
     end
 
     local lowerArg = strlower(arg);
+
+    if (lowerArg == "list" or lowerArg == "status") then
+        self:printPlayerRolls();
+        return;
+    end
+
+    if (lowerArg == "won" or lowerArg == "export" or lowerArg == "awards") then
+        self:showAwardExport();
+        return;
+    end
+
+    if (lowerArg == "clearwon") then
+        self.AwardedItems = {};
+        self:persist();
+        GL:success("[Rolling SR] Cleared won items export log.");
+        return;
+    end
+
+    local maxVal = lowerArg:match("^max%s+(%d+)$") or lowerArg:match("^cap%s+(%d+)$");
+    if (maxVal) then
+        self.maxExtraRolls = tonumber(maxVal) or 100;
+        self:persist();
+        GL:success(("[Rolling SR] Max accumulated extra rolls cap set to %d."):format(self.maxExtraRolls));
+        return;
+    elseif (lowerArg == "max" or lowerArg == "cap") then
+        GL:message(("[Rolling SR] Current max accumulated extra rolls cap: %d (change with /rsr max <number>)."):format(self.maxExtraRolls or 100));
+        return;
+    end
+
+    local altRollsArg = lowerArg:match("^altrolls?%s*(.*)$");
+    if (altRollsArg ~= nil) then
+        altRollsArg = strtrim(altRollsArg);
+        if (altRollsArg == "on" or altRollsArg == "true" or altRollsArg == "1") then
+            self.altsAccrueRolls = true;
+        elseif (altRollsArg == "off" or altRollsArg == "false" or altRollsArg == "0") then
+            self.altsAccrueRolls = false;
+        else
+            self.altsAccrueRolls = not self.altsAccrueRolls;
+        end
+        self:persist();
+        local stateStr = self.altsAccrueRolls and "ENABLED (Alts use accumulated bonus rolls when no Main reserved)" or "DISABLED (Alts always have 0 bonus rolls)";
+        GL:success(("[Rolling SR] Alt bonus roll accumulation is now %s."):format(stateStr));
+        return;
+    end
+
+    local checkTarget = arg:match("^[cC][hH][eE][cC][kK]%s+(.+)$");
+    if (checkTarget) then
+        self:printPlayerRolls(strtrim(checkTarget));
+        return;
+    end
 
     if (lowerArg == "test" or lowerArg == "demo") then
         self:enableTestMode();
@@ -701,22 +1078,37 @@ function RollingSR:handleCommand(argumentString)
         return;
     end
 
-    if (lowerArg == "sim tie" or lowerArg == "simulate tie") then
-        self:simulateRolls(true);
+    if (lowerArg == "tie" or lowerArg == "sim tie" or lowerArg == "simulate tie") then
+        self:simulateRolls("tie");
         return;
     end
 
-    if (lowerArg == "broadcast" or lowerArg == "sync") then
+    if (lowerArg == "simpug" or lowerArg == "sim pug" or lowerArg == "simulate pug") then
+        self:simulateRolls("pug");
+        return;
+    end
+
+    if (lowerArg == "simalt" or lowerArg == "sim alt" or lowerArg == "simulate alt") then
+        self:simulateRolls("alt");
+        return;
+    end
+
+    if (lowerArg == "simwon" or lowerArg == "sim won" or lowerArg == "simaward" or lowerArg == "sim award") then
+        self:simulateAward();
+        return;
+    end
+
+    if (lowerArg == "sync" or lowerArg == "broadcast") then
         self:broadcast();
         return;
     end
 
-    if (lowerArg == "broadcast guild" or lowerArg == "sync guild") then
+    if (lowerArg == "guild" or lowerArg == "broadcast guild" or lowerArg == "sync guild") then
         self:broadcast("GUILD");
         return;
     end
 
-    if (lowerArg == "broadcast group" or lowerArg == "broadcast raid" or lowerArg == "sync raid") then
+    if (lowerArg == "raid" or lowerArg == "group" or lowerArg == "broadcast group" or lowerArg == "broadcast raid" or lowerArg == "sync raid") then
         self:broadcast("GROUP");
         return;
     end
@@ -727,10 +1119,17 @@ function RollingSR:handleCommand(argumentString)
         return;
     end
 
+    -- Single word without ":" or "=" is a player name lookup (e.g. "/rsr Thrall")
+    if (not arg:find("[:=;]") and not arg:find("%s")) then
+        self:printPlayerRolls(arg);
+        return;
+    end
+
     -- Otherwise, treat argumentString as the import string
     local success = self:parseImportString(arg);
     if (success) then
         GL:success(("[Rolling SR] Successfully imported bonus rolls for %d players!"):format(self:countPlayers()));
+        self:broadcast();
     else
         GL:warning("[Rolling SR] Failed to import. Expected format: Player:Item=Rolls,Item=Rolls;");
     end
@@ -745,47 +1144,87 @@ function RollingSR:enableTestMode()
         playerName = UnitName and UnitName("player") or "Tester";
     end
 
-    -- 1. Setup mock Soft Reserves in Gargul for Deathbringer's Will (50363)
-    local testItem = "Deathbringer's Will";
-    local testItemID = 50363;
+    -- 1. Setup mock Soft Reserves in Gargul for two Vanilla Molten Core items
+    --    (present in all WoW clients including Vanilla / Classic Era / WoW Forever 16001):
+    --    18832 (Brutality Blade): Main + Alt + Pug
+    --    18820 (Talisman of Ephemeral Power): Alt + Pug only (no Mains)
+    local testItem = "Brutality Blade";
+    local testItemID = 18832;
+    local altItem = "Talisman of Ephemeral Power";
+    local altItemID = 18820;
+
+    if (GL.hydrateItemLink) then
+        GL:hydrateItemLink(testItemID);
+        GL:hydrateItemLink(altItemID);
+    end
+
     local csvData = table.concat({
         "Name,Class,ItemId,ItemName,Note,Plus",
         ("%s,Warrior,%d,%s,,0"):format(playerName, testItemID, testItem),
         ("Guildmate,Paladin,%d,%s,,0"):format(testItemID, testItem),
+        ("Guildalt,Hunter,%d,%s,,0"):format(testItemID, testItem),
         ("Pugman,Rogue,%d,%s,,0"):format(testItemID, testItem),
+        ("Guildalt,Hunter,%d,%s,,0"):format(altItemID, altItem),
+        ("Pugman,Rogue,%d,%s,,0"):format(altItemID, altItem),
     }, "\n");
 
     if (GL.SoftRes and GL.SoftRes.importCSVData) then
         GL.SoftRes:importCSVData(csvData, false);
     end
 
-    -- 2. Setup mock Rolling SR bonus rolls (Player has +2, Guildmate has +1, Pugman has none/not listed)
-    local rsrString = ("%s:%s=2;Guildmate:%s=1;"):format(playerName, testItem, testItem);
+    -- 2. Setup mock Rolling SR bonus rolls
+    local rsrString = ("%s:%s=2;Guildmate:%s=1;Guildalt*alt:%s=1,%s=2;"):format(
+        playerName, testItem, testItem, testItem, altItem
+    );
     self:parseImportString(rsrString);
 
     GL:success("=================================================");
     GL:success("[Rolling SR] TEST MODE ENABLED (No Sheet Needed!)");
-    GL:message(("Sample Soft Reserves loaded for [%s]:"):format(testItem));
-    GL:message(("  • %s (You): +2 bonus rolls (3 total in Phase 2)"):format(GL:capitalize(playerName)));
-    GL:message("  • Guildmate: +1 bonus roll (2 total in Phase 2)");
-    GL:message("  • Pugman: Pug (Phase 1 only, no bonus rolls)");
-    GL:message("How to test solo right now:");
-    GL:message(("  1. Type: /gl ro %d   (starts roll-off)"):format(testItemID));
-    GL:message("  2. Type: /roll 1-100");
-    GL:message("  3. Type: /gl rsr sim   (simulates rolls for Pugman & Guildmate)");
-    GL:message("     (or /gl rsr sim tie to test tie-break!)");
-    GL:message("  4. Watch live counter & click 'Stop Phase 1'!");
-    GL:message("  5. Type: /gl rsr clear (when finished)");
+    GL:message(("1) [%s] (%d) — Mains + Alt + Pug:"):format(testItem, testItemID));
+    GL:message(("   • %s (You - Main): +2 bonus rolls | Guildmate (Main): +1 | Guildalt (Alt) | Pugman (Pug)"):format(GL:capitalize(playerName)));
+    GL:message(("2) [%s] (%d) — Alt + Pug Only (no Mains):"):format(altItem, altItemID));
+    GL:message("   • Guildalt (Alt): +0 default, or +2 when '/rsr altrolls' is ON | Pugman (Pug)");
+    GL:message("Test commands during '/gl ro 18832' or '/gl ro 18820':");
+    GL:message("  • /rsr sim      - Standard roll simulation (Phase 1, Tie-Break, or Phase 2)");
+    GL:message("  • /rsr simpug   - Simulate Pug winning Phase 1 outright (99)");
+    GL:message("  • /rsr simalt   - Simulate Alt winning Phase 1 over Pug (97)");
+    GL:message("  • /rsr tie      - Simulate Phase 1 tie (95) to test tie-breaker");
+    GL:message("  • /rsr simwon   - Simulate awarding the item to test '/rsr won' export");
+    GL:message("  • /rsr altrolls - Toggle Alt bonus roll accumulation ON/OFF");
+    GL:message("  • /rsr clear    - Clean up test data when finished");
     GL:success("=================================================");
+end
+
+--- Simulate an item award during test mode so /rsr won can be tested without a boss corpse
+---
+---@return nil
+function RollingSR:simulateAward()
+    local winner = "Guildmate";
+    local itemLinkOrName = "Brutality Blade";
+
+    if (GL.RollOff and GL.RollOff.CurrentRollOff) then
+        local ro = GL.RollOff.CurrentRollOff;
+        if (ro.itemLink or ro.itemName) then
+            itemLinkOrName = ro.itemLink or ro.itemName;
+        end
+        local Top = topRolls(ro.Rolls or {}, function (Roll)
+            return self:isGuildPlayer(Roll.player);
+        end);
+        if (#Top > 0 and Top[1].player) then
+            winner = Top[1].player;
+        end
+    end
+
+    self:onItemAwarded(winner, itemLinkOrName);
 end
 
 --- Simulate rolls from other reservists during a test roll-off
 ---
----@param forceTie? boolean
+---@param mode? boolean|string
 ---@return nil
-function RollingSR:simulateRolls(forceTie)
+function RollingSR:simulateRolls(mode)
     if (not GL.RollOff or not GL.RollOff.inProgress) then
-        GL:warning("[Rolling SR Sim] No roll-off is currently in progress. Start one with /gl ro 50363");
+        GL:warning("[Rolling SR Sim] No roll-off is currently in progress. Start one with /gl ro 18832 or /gl ro 18820");
         return;
     end
 
@@ -794,16 +1233,44 @@ function RollingSR:simulateRolls(forceTie)
         return;
     end
 
+    local isTie = (mode == true or mode == "tie");
+    local isPugWin = (mode == "pug");
+    local isAltWin = (mode == "alt");
+
     if (self.phase == PHASE_ONE) then
         if (self.round == 0) then
-            if (forceTie) then
+            if (isTie) then
                 GL.RollOff:processRoll("Pugman rolls 95 (1-100)");
-                GL.RollOff:processRoll("Guildmate rolls 95 (1-100)");
-                GL:success("[Rolling SR Sim] Simulated Phase 1 tie: Pugman (95), Guildmate (95). Click 'Stop Phase 1' to test tie-break!");
+                if (self:anyMainReservedCurrentItem()) then
+                    GL.RollOff:processRoll("Guildmate rolls 95 (1-100)");
+                    GL:success("[Rolling SR Sim] Simulated Phase 1 tie: Pugman (95), Guildmate (95). Click 'Stop Phase 1' to test tie-break!");
+                else
+                    GL.RollOff:processRoll("Guildalt rolls 95 (1-100)");
+                    GL:success("[Rolling SR Sim] Simulated Phase 1 tie: Pugman (95), Guildalt (95). Click 'Stop Phase 1' to test tie-break!");
+                end
+            elseif (isPugWin) then
+                GL.RollOff:processRoll("Pugman rolls 99 (1-100)");
+                GL.RollOff:processRoll("Guildalt rolls 55 (1-100)");
+                if (self:anyMainReservedCurrentItem()) then
+                    GL.RollOff:processRoll("Guildmate rolls 42 (1-100)");
+                end
+                GL:success("[Rolling SR Sim] Simulated Pug high roll: Pugman (99). Click 'Stop Phase 1' to see Pug win Phase 1 outright!");
+            elseif (isAltWin) then
+                GL.RollOff:processRoll("Pugman rolls 80 (1-100)");
+                GL.RollOff:processRoll("Guildalt rolls 97 (1-100)");
+                if (self:anyMainReservedCurrentItem()) then
+                    GL.RollOff:processRoll("Guildmate rolls 45 (1-100)");
+                end
+                GL:success("[Rolling SR Sim] Simulated Alt high roll: Guildalt (97) vs Pugman (80). Click 'Stop Phase 1' to trigger Phase 2!");
             else
                 GL.RollOff:processRoll("Pugman rolls 72 (1-100)");
-                GL.RollOff:processRoll("Guildmate rolls 85 (1-100)");
-                GL:success("[Rolling SR Sim] Simulated Phase 1 rolls: Pugman (72), Guildmate (85).");
+                GL.RollOff:processRoll("Guildalt rolls 88 (1-100)");
+                if (self:anyMainReservedCurrentItem()) then
+                    GL.RollOff:processRoll("Guildmate rolls 85 (1-100)");
+                    GL:success("[Rolling SR Sim] Simulated Phase 1 rolls: Pugman (72), Guildalt (88), Guildmate (85).");
+                else
+                    GL:success("[Rolling SR Sim] Simulated Phase 1 rolls: Pugman (72), Guildalt (88).");
+                end
             end
         else
             -- In tie-break round
@@ -813,11 +1280,19 @@ function RollingSR:simulateRolls(forceTie)
             if (self.TiedPlayers and self.TiedPlayers["guildmate"]) then
                 GL.RollOff:processRoll("Guildmate rolls 89 (1-100)");
             end
+            if (self.TiedPlayers and self.TiedPlayers["guildalt"]) then
+                GL.RollOff:processRoll("Guildalt rolls 89 (1-100)");
+            end
             GL:success("[Rolling SR Sim] Simulated tie-break rolls!");
         end
     elseif (self.phase == PHASE_TWO) then
-        GL.RollOff:processRoll("Guildmate rolls 94 (1-100)");
-        GL:success("[Rolling SR Sim] Simulated bonus roll for Guildmate (94).");
+        if (self:anyMainReservedCurrentItem()) then
+            GL.RollOff:processRoll("Guildmate rolls 94 (1-100)");
+            GL:success("[Rolling SR Sim] Simulated Phase 2 bonus roll for Guildmate (94).");
+        else
+            GL.RollOff:processRoll("Guildalt rolls 91 (1-100)");
+            GL:success("[Rolling SR Sim] Simulated Phase 2 roll for Guildalt (91).");
+        end
     end
 
     if (GL.MasterLooterUI and GL.MasterLooterUI.updateWidgets) then

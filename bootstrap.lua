@@ -261,6 +261,11 @@ GL.Ace:RegisterChatCommand("gdkp", function (...)
     GL.Commands:call("gdkp");
 end);
 
+-- Register the rsr slash command
+GL.Ace:RegisterChatCommand("rsr", function (...)
+    GL.RollingSR:handleCommand(...);
+end);
+
 --- Announce conflicting addons, if any
 ---@return nil
 function GL:announceConflictingAddons()

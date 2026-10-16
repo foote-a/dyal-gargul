@@ -76,13 +76,14 @@ function Importer:draw()
     Window:AddChild(RollingSRLabel);
 
     -- Rolling SR extra rolls input
-    local rollingExtraRollsContent = "";
+    local rollingExtraRollsContent = GL.RollingSR and GL.RollingSR.rawImportString or "";
     local RollingSRBox = AceGUI:Create("MultiLineEditBox");
     RollingSRBox:SetFullWidth(true);
     RollingSRBox:DisableButton(true);
     RollingSRBox:SetLabel("");
     RollingSRBox:SetNumLines(4);
     RollingSRBox:SetMaxLetters(999999999);
+    RollingSRBox:SetText(rollingExtraRollsContent);
     Window:AddChild(RollingSRBox);
 
     RollingSRBox:SetCallback("OnTextChanged", function (_, _, text)
@@ -108,15 +109,31 @@ function Importer:draw()
     ImportButton:SetText(L["Import"]);
     ImportButton:SetWidth(140);
     ImportButton:SetCallback("OnClick", function ()
-        GL.SoftRes:import(softReservesBoxContent, true);
+        local srText = strtrim(softReservesBoxContent or "");
+        local rsrText = strtrim(rollingExtraRollsContent or "");
 
-        -- Parse Rolling SR extra rolls (independent of SoftRes success)
-        if (not GL:empty(rollingExtraRollsContent)) then
-            if (GL.RollingSR:parseImportString(rollingExtraRollsContent)) then
+        -- Route a Rolling SR string pasted into the top box to RollingSR
+        if (srText ~= "" and rsrText == "" and not srText:find("\n") and (srText:find("^[^:,;\n]+:[^=;\n]+=%s*%d+") or srText:find("^[^:,;\n]+%*[aA][lL][tT]:"))) then
+            rsrText = srText;
+            srText = "";
+        end
+
+        if (srText ~= "") then
+            GL.SoftRes:import(srText, true);
+        end
+
+        if (rsrText ~= "") then
+            if (GL.RollingSR:parseImportString(rsrText)) then
                 GL:success("Rolling SR extra rolls imported successfully");
+                GL.RollingSR:broadcast();
+                if (srText == "") then
+                    self:close();
+                end
             else
                 GL:warning("Failed to parse Rolling SR extra rolls data");
             end
+        elseif (srText == "") then
+            GL.SoftRes:import("", true);
         end
     end);
     Window:AddChild(ImportButton);

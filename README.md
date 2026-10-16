@@ -28,6 +28,7 @@ Run this in-game and Gargul walks you through everything: hotkeys, GDKP, Softres
 |---|---|---|
 | **GDKP** | Auction loot and split the gold. Multi-auction lets you sell many items at once. | `/gdkp` or `/gl ma` |
 | **Softres** | Import soft reserves from softres.it. Reserves show on tooltips and when rolling. | `/gl sr` |
+| **Rolling SR** | Two-phase soft-reserve system with accumulated weekly bonus rolls and Google Sheets integration ([Full Guide](README_ROLLING_SR.md)). | `/rsr` |
 | **Auto Looting** | Automatically send loot to the right player. Greens to DE, epics to ML, you name it. | `/gl pm` |
 | **Auto Rolling** | Search for items and assign need, greed, or pass. Gargul rolls for you automatically. | `/gl autoroll` |
 | **TMB / DFT** | Import wishlists and prio lists. Tooltip and roll integration. | `/gl tmb` or `/gl dft` |
@@ -57,6 +58,7 @@ Change hotkeys in `/gl` -> Shortcut Keys.
 | `/gdkp` | GDKP session manager |
 | `/gl ma` | Multi-auction (batch auction) |
 | `/gl sr` | Softres import |
+| `/rsr` | Rolling SR import, won-item export, & test mode ([Guide](README_ROLLING_SR.md)) |
 | `/gl pm` | Auto loot rules (PackMule) |
 | `/gl autoroll` | Auto roll rules |
 

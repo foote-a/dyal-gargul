@@ -104,7 +104,15 @@ function MasterLooterUI:draw(itemLink)
     local Window = GL.Interface:get(self, "Window");
     if (Window) then
         if (itemLink) then
-            MasterLooterUI:passItemLink(itemLink);
+            if (type(itemLink) == "string" and strmatch(itemLink, "^%s*%d+%s*$")) then
+                GL:hydrateItemLink(strtrim(itemLink), function (hydratedLink)
+                    if (hydratedLink) then
+                        MasterLooterUI:passItemLink(hydratedLink);
+                    end
+                end);
+            else
+                MasterLooterUI:passItemLink(itemLink);
+            end
         end
 
         -- If the frame is hidden we need to show it again
@@ -663,7 +671,15 @@ function MasterLooterUI:draw(itemLink)
     if (itemLink
         and type(itemLink) == "string"
     ) then
-        MasterLooterUI:passItemLink(itemLink);
+        if (strmatch(itemLink, "^%s*%d+%s*$")) then
+            GL:hydrateItemLink(strtrim(itemLink), function (hydratedLink)
+                if (hydratedLink) then
+                    MasterLooterUI:passItemLink(hydratedLink);
+                end
+            end);
+        else
+            MasterLooterUI:passItemLink(itemLink);
+        end
     end
 end
 

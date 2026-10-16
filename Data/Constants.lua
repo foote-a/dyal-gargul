@@ -10,12 +10,12 @@ GL.Data.Constants = {
         VANILLA_WRATH = 30300, -- Original 3.3.5a
         ERA = 11509,
         FOREVER = 16001,
-        BCC = 20505,
+        BCC = 20506,
         WRATH = 30405,
-        TITAN = 38000,
+        TITAN = 38002,
         CATA = 40402,
-        MISTS = 50503,
-        RETAIL = 120000,
+        MISTS = 50504,
+        RETAIL = 120105,
     },
     ItemOfInterestReasons = {
         RESERVE = 1,

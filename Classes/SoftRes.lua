@@ -168,6 +168,19 @@ function SoftRes:handleWhisperCommand(_, message, sender)
                 entryString = (L.CHAT["%s (%sx)"]):format(entryString, Reserves[itemIDString]);
             end
 
+            if (GL.RollingSR and GL.RollingSR:hasData() and GL.RollingSR:isGuildPlayer(name)) then
+                local extra = GL.RollingSR:getExtraRolls(name, Entry.link);
+                if (GL.RollingSR:isAlt(name)) then
+                    if (extra > 0) then
+                        entryString = ("%s (Alt +%d bonus)"):format(entryString, extra);
+                    else
+                        entryString = ("%s (Alt)"):format(entryString);
+                    end
+                else
+                    entryString = ("%s (+%d bonus)"):format(entryString, extra);
+                end
+            end
+
             tinsert(Entries, entryString);
         end
 
@@ -853,7 +866,13 @@ function SoftRes:tooltipLines(itemLink)
 
         if (GL.RollingSR and GL.RollingSR:hasData()) then
             local extra = GL.RollingSR:getExtraRolls(Entry.player, itemLink);
-            if (GL.RollingSR:isGuildPlayer(Entry.player)) then
+            if (GL.RollingSR:isAlt(Entry.player)) then
+                if (extra > 0) then
+                    entryString = entryString .. (" |cFF69CCF0(Alt +%d)|r"):format(extra);
+                else
+                    entryString = entryString .. " |cFF69CCF0(Alt)|r";
+                end
+            elseif (GL.RollingSR:isGuildPlayer(Entry.player)) then
                 if (extra > 0) then
                     entryString = entryString .. (" |cFF00FF00(+%d bonus)|r"):format(extra);
                 else
