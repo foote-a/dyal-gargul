@@ -17,6 +17,9 @@ local RollingSR = {
     -- { [lowercasePlayerName] = true, }
     Alts = {},
 
+    -- { [lowercasePlayerName] = true, }
+    Recruits = {},
+
     -- { { player = "Thrall", item = "Deathbringer's Will", }, }
     AwardedItems = {},
 
@@ -66,6 +69,7 @@ function RollingSR:_init()
     -- Restore saved extra rolls across /reload or relog
     self.ExtraRolls = GL.DB:get("RollingSR.ExtraRolls", {}) or {};
     self.Alts = GL.DB:get("RollingSR.Alts", {}) or {};
+    self.Recruits = GL.DB:get("RollingSR.Recruits", {}) or {};
     self.AwardedItems = GL.DB:get("RollingSR.AwardedItems", {}) or {};
     self.maxExtraRolls = tonumber(GL.DB:get("RollingSR.maxExtraRolls", 100)) or 100;
     self.altsAccrueRolls = GL.DB:get("RollingSR.altsAccrueRolls", false) == true;
@@ -116,6 +120,7 @@ function RollingSR:parseImportString(data)
 
     local Parsed = {};
     local ParsedAlts = {};
+    local ParsedRecruits = {};
     local cap = tonumber(self.maxExtraRolls) or 100;
 
     for entry in data:gmatch("[^;]+") do
@@ -126,10 +131,16 @@ function RollingSR:parseImportString(data)
             itemList = strtrim(itemList);
 
             local isAlt = false;
+            local isRecruit = false;
             local altBase = rawPlayer:match("^(.-)%*[aA][lL][tT]$") or rawPlayer:match("^(.-)%s*%([aA][lL][tT]%)$");
             if (altBase) then
                 rawPlayer = strtrim(altBase);
                 isAlt = true;
+            end
+            local recruitBase = rawPlayer:match("^(.-)%*[rR][eE][cC][rR][uU][iI][tT]$") or rawPlayer:match("^(.-)%s*%([rR][eE][cC][rR][uU][iI][tT]%)$");
+            if (recruitBase) then
+                rawPlayer = strtrim(recruitBase);
+                isRecruit = true;
             end
 
             local playerName = normalizeName(rawPlayer);
@@ -150,6 +161,8 @@ function RollingSR:parseImportString(data)
                 Parsed[playerName] = Items;
                 if (isAlt) then
                     ParsedAlts[playerName] = true;
+                elseif (isRecruit) then
+                    ParsedRecruits[playerName] = true;
                 end
             end
         end
@@ -157,6 +170,7 @@ function RollingSR:parseImportString(data)
 
     self.ExtraRolls = Parsed;
     self.Alts = ParsedAlts;
+    self.Recruits = ParsedRecruits;
     self.rawImportString = data;
     self:persist();
 
@@ -221,6 +235,22 @@ function RollingSR:isAlt(playerName)
     return (self.Alts and self.Alts[normalizeName(playerName)]) == true;
 end
 
+--- Check whether a guild player is flagged as a Recruit on trial
+---
+---@param playerName string
+---@return boolean
+function RollingSR:isRecruit(playerName)
+    return (self.Recruits and self.Recruits[normalizeName(playerName)]) == true;
+end
+
+--- Check whether a player is a Full Guild Member (not Alt or Recruit)
+---
+---@param playerName string
+---@return boolean
+function RollingSR:isMember(playerName)
+    return self:isGuildPlayer(playerName) and not self:isAlt(playerName) and not self:isRecruit(playerName);
+end
+
 --- Check whether a player is a Guild Main (Member or Recruit, not Alt or Pug)
 ---
 ---@param playerName string
@@ -242,7 +272,7 @@ function RollingSR:reservedCurrentItem(playerName)
     return GL.SoftRes:itemIDIsReservedByPlayer(CurrentRollOff.itemID, playerName);
 end
 
---- Did at least one Guild Main reserve the current roll-off item?
+--- Did at least one Full Guild Member reserve the current roll-off item?
 ---
 ---@return boolean
 function RollingSR:anyMainReservedCurrentItem()
@@ -250,14 +280,14 @@ function RollingSR:anyMainReservedCurrentItem()
     local normItem = normalizeItem(CurrentRollOff and CurrentRollOff.itemName or "");
 
     for name, Items in pairs(self.ExtraRolls or {}) do
-        if (not self:isAlt(name) and Items[normItem] ~= nil) then
+        if (not self:isAlt(name) and not self:isRecruit(name) and Items[normItem] ~= nil) then
             return true;
         end
     end
 
     if (GL.SoftRes and GL.SoftRes:available() and CurrentRollOff and CurrentRollOff.itemID and GL.SoftRes.byItemID) then
         for _, srName in pairs(GL.SoftRes:byItemID(CurrentRollOff.itemID) or {}) do
-            if (self:isMain(srName)) then
+            if (self:isMember(srName)) then
                 return true;
             end
         end
@@ -291,7 +321,46 @@ function RollingSR:anyPugReservedCurrentItem()
     return false;
 end
 
---- Alts can never win gear over Mains; they are only Phase 2 eligible if no Main reserved the item
+--- Check whether any player in the raid group is a Pug (not in guild ExtraRolls)
+---
+---@return boolean
+function RollingSR:anyPugInRaid()
+    if (not IsInRaid or not IsInRaid()) then
+        return false;
+    end
+
+    local numMembers = GetNumGroupMembers and GetNumGroupMembers() or 0;
+    for i = 1, numMembers do
+        local name = GetRaidRosterInfo and GetRaidRosterInfo(i);
+        if (name and not self:isGuildPlayer(name)) then
+            return true;
+        end
+    end
+
+    return false;
+end
+
+--- Check whether Pugs are present (reserved the item, in raid, or test flag)
+---
+---@return boolean
+function RollingSR:pugsPresent()
+    if (self._testPugPresent ~= nil) then
+        return self._testPugPresent;
+    end
+
+    if (self:anyPugReservedCurrentItem()) then
+        return true;
+    end
+
+    if (self:anyPugInRaid()) then
+        return true;
+    end
+
+    return false;
+end
+
+--- Alts can never win gear over Mains; they are only Phase 2 eligible if no Main reserved the item.
+--- Recruits on trial are Phase 2 eligible with 0 bonus rolls (their Phase 1 roll stands).
 ---
 ---@param playerName string
 ---@return boolean
@@ -326,13 +395,13 @@ function RollingSR:getExtraRolls(playerName, itemName)
     return math.min(raw, cap);
 end
 
---- Phase 2 allows 1 + ExtraRolls rolls
+--- Phase 2 allows ExtraRolls bonus rolls (Phase 1 roll stands as a candidate to win)
 ---
 ---@param playerName string
 ---@param itemName string
 ---@return number
 function RollingSR:allowedPhase2Rolls(playerName, itemName)
-    return 1 + self:getExtraRolls(playerName, itemName);
+    return self:getExtraRolls(playerName, itemName);
 end
 
 ---@return boolean
@@ -567,7 +636,7 @@ function RollingSR:startPhase2(CurrentRollOff)
     local itemName = CurrentRollOff.itemName or "";
 
     GL:sendChatMessage(
-        ("Rolling SR Phase 2: guild reservists, /roll on %s!"):format(CurrentRollOff.itemLink or itemName),
+        ("Rolling SR Phase 2: guild players, roll your bonus rolls on %s! (Phase 1 rolls stand)"):format(CurrentRollOff.itemLink or itemName),
         "RAID_WARNING"
     );
 
@@ -575,10 +644,17 @@ function RollingSR:startPhase2(CurrentRollOff)
         if (self:isPhase2Eligible(name)) then
             local extra = self:getExtraRolls(name, itemName);
 
-            GL:sendChatMessage(
-                ("%s: %d roll(s) (%d extra)"):format(GL:capitalize(name), 1 + extra, extra),
-                "GROUP"
-            );
+            if (extra > 0) then
+                GL:sendChatMessage(
+                    ("%s: %d bonus roll(s) in Phase 2 (Phase 1 rolls stand!)"):format(GL:capitalize(name), extra),
+                    "GROUP"
+                );
+            else
+                GL:sendChatMessage(
+                    ("%s: 0 bonus rolls (Phase 1 roll stands)"):format(GL:capitalize(name)),
+                    "GROUP"
+                );
+            end
         end
     end
 
@@ -632,6 +708,7 @@ end
 function RollingSR:persist()
     GL.DB:set("RollingSR.ExtraRolls", self.ExtraRolls);
     GL.DB:set("RollingSR.Alts", self.Alts);
+    GL.DB:set("RollingSR.Recruits", self.Recruits);
     GL.DB:set("RollingSR.AwardedItems", self.AwardedItems);
     GL.DB:set("RollingSR.maxExtraRolls", self.maxExtraRolls);
     GL.DB:set("RollingSR.altsAccrueRolls", self.altsAccrueRolls);
@@ -740,6 +817,7 @@ end
 function RollingSR:clear()
     self.ExtraRolls = {};
     self.Alts = {};
+    self.Recruits = {};
     self.AwardedItems = {};
     self.rawImportString = "";
     self:resetPhase();
@@ -901,6 +979,14 @@ function RollingSR:handleWhisperCommand(message, sender)
         return;
     end
 
+    if (self:isRecruit(name)) then
+        GL:sendChatMessage(
+            "[Rolling SR] Your character is registered as a Guild Recruit (+0 bonus rolls during 2-week trial; Phase 1 roll stands in Phase 2; soft reserves accrue bonus rolls for when trial ends).",
+            "WHISPER", nil, sender
+        );
+        return;
+    end
+
     if (self:isAlt(name)) then
         if (not self.altsAccrueRolls or GL:empty(Items)) then
             GL:sendChatMessage(
@@ -913,7 +999,7 @@ function RollingSR:handleWhisperCommand(message, sender)
         local AltParts = {};
         for item in pairs(Items) do
             local rolls = self:getExtraRolls(name, item);
-            tinsert(AltParts, ("%s (Alt +%d bonus, %d Phase 2 rolls if no Main reserved)"):format(item, rolls, 1 + rolls));
+            tinsert(AltParts, ("%s (Alt +%d bonus roll(s) in Phase 2 if no Main reserved; Phase 1 roll stands)"):format(item, rolls));
         end
         table.sort(AltParts);
         GL:sendChatMessage(
@@ -934,7 +1020,7 @@ function RollingSR:handleWhisperCommand(message, sender)
     local Parts = {};
     for item in pairs(Items) do
         local rolls = self:getExtraRolls(name, item);
-        tinsert(Parts, ("%s (+%d bonus, %d Phase 2 rolls)"):format(item, rolls, 1 + rolls));
+        tinsert(Parts, ("%s (+%d bonus roll(s) in Phase 2; Phase 1 roll stands)"):format(item, rolls));
     end
     table.sort(Parts);
 
@@ -961,7 +1047,7 @@ function RollingSR:printPlayerRolls(targetName)
             GL:warning(("[Rolling SR] %s is not in the guild bonus roll table (treated as Pug)."):format(GL:capitalize(key)));
             return;
         end
-        local roleTag = self:isAlt(key) and " [Alt]" or "";
+        local roleTag = self:isAlt(key) and " [Alt]" or (self:isRecruit(key) and " [Recruit]" or "");
         local Parts = {};
         for item in pairs(Items) do
             tinsert(Parts, ("%s (+%d)"):format(item, self:getExtraRolls(key, item)));
@@ -981,7 +1067,7 @@ function RollingSR:printPlayerRolls(targetName)
     local altMode = self.altsAccrueRolls and "ON" or "OFF";
     GL:message(("[Rolling SR] Loaded players (%d, max cap: %d, alt bonus rolls: %s):"):format(#Names, self.maxExtraRolls or 100, altMode));
     for _, name in ipairs(Names) do
-        local roleTag = self:isAlt(name) and " [Alt]" or "";
+        local roleTag = self:isAlt(name) and " [Alt]" or (self:isRecruit(name) and " [Recruit]" or "");
         local Parts = {};
         for item in pairs(self.ExtraRolls[name]) do
             tinsert(Parts, ("%s (+%d)"):format(item, self:getExtraRolls(name, item)));

@@ -176,6 +176,8 @@ function SoftRes:handleWhisperCommand(_, message, sender)
                     else
                         entryString = ("%s (Alt)"):format(entryString);
                     end
+                elseif (GL.RollingSR.isRecruit and GL.RollingSR:isRecruit(name)) then
+                    entryString = ("%s (Recruit)"):format(entryString);
                 else
                     entryString = ("%s (+%d bonus)"):format(entryString, extra);
                 end
@@ -871,6 +873,12 @@ function SoftRes:tooltipLines(itemLink)
                     entryString = entryString .. (" |cFF69CCF0(Alt +%d)|r"):format(extra);
                 else
                     entryString = entryString .. " |cFF69CCF0(Alt)|r";
+                end
+            elseif (GL.RollingSR.isRecruit and GL.RollingSR:isRecruit(Entry.player)) then
+                if (GL.RollingSR.pugsPresent and not GL.RollingSR:pugsPresent()) then
+                    entryString = entryString .. " |cFFFFCC00(Recruit - Locked)|r";
+                else
+                    entryString = entryString .. " |cFFFFCC00(Recruit - Trial)|r";
                 end
             elseif (GL.RollingSR:isGuildPlayer(Entry.player)) then
                 if (extra > 0) then

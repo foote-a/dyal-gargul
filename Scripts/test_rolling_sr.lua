@@ -103,8 +103,8 @@ assert(R:isGuildPlayer("thrall"));
 assert(R:isGuildPlayer("arthas"));
 assert(not R:isGuildPlayer("pugman"));
 assert(R:getExtraRolls("Thrall", "Deathbringer's Will") == 2);
-assert(R:allowedPhase2Rolls("Thrall", "Deathbringer's Will") == 3);
-assert(R:allowedPhase2Rolls("Arthas", "Deathbringer's Will") == 2);
+assert(R:allowedPhase2Rolls("Thrall", "Deathbringer's Will") == 2);
+assert(R:allowedPhase2Rolls("Arthas", "Deathbringer's Will") == 1);
 print("Test 1 passed!");
 
 print("--- Test 2: Phase 1 Rolls and Gating ---");
@@ -171,23 +171,17 @@ assert(not R:acceptRoll(rPugP2));
 local rT1 = { player = "Thrall", amount = 88 };
 local rT2 = { player = "Thrall", amount = 94 };
 local rT3 = { player = "Thrall", amount = 91 };
-local rT4 = { player = "Thrall", amount = 99 };
 assert(R:acceptRoll(rT1));
 tinsert(mockRollOff.CurrentRollOff.Rolls, rT1);
 assert(R:acceptRoll(rT2));
 tinsert(mockRollOff.CurrentRollOff.Rolls, rT2);
-assert(R:acceptRoll(rT3));
-tinsert(mockRollOff.CurrentRollOff.Rolls, rT3);
-assert(not R:acceptRoll(rT4));
+assert(not R:acceptRoll(rT3), "Thrall has 2 bonus rolls, 3rd Phase 2 roll must be rejected!");
 
 local rA1 = { player = "Arthas", amount = 96 };
 local rA2 = { player = "Arthas", amount = 75 };
-local rA3 = { player = "Arthas", amount = 98 };
 assert(R:acceptRoll(rA1));
 tinsert(mockRollOff.CurrentRollOff.Rolls, rA1);
-assert(R:acceptRoll(rA2));
-tinsert(mockRollOff.CurrentRollOff.Rolls, rA2);
-assert(not R:acceptRoll(rA3));
+assert(not R:acceptRoll(rA2), "Arthas has 1 bonus roll, 2nd Phase 2 roll must be rejected!");
 print("Test 5 passed!");
 
 print("--- Test 6: Stop Phase 2 & Winner Determination ---");
@@ -238,7 +232,7 @@ print("--- Test 8: Item Awarded Resets Extra Rolls ---");
 assert(R:getExtraRolls("Thrall", "Deathbringer's Will") == 2);
 R:onItemAwarded("Thrall", "Deathbringer's Will");
 assert(R:getExtraRolls("Thrall", "Deathbringer's Will") == 0);
-assert(R:allowedPhase2Rolls("Thrall", "Deathbringer's Will") == 1);
+assert(R:allowedPhase2Rolls("Thrall", "Deathbringer's Will") == 0);
 print("Test 8 passed!");
 
 print("--- Test 9: getStatusText in Phase 1 and Phase 2 ---");
@@ -264,11 +258,11 @@ R.ExtraRolls = {
     thrall = { ["deathbringer's will"] = 0 },
     arthas = { ["deathbringer's will"] = 1 },
 };
-assert(R:getStatusText("Deathbringer's Will"):find("Phase 2: 0/3 rolls", 1, true));
-R:acceptRoll({ player = "Thrall", amount = 90 });
-R:acceptRoll({ player = "Arthas", amount = 91 });
-R:acceptRoll({ player = "Arthas", amount = 92 });
-assert(R:getStatusText("Deathbringer's Will"):find("Phase 2: 3/3 (All in!)", 1, true));
+assert(R:getStatusText("Deathbringer's Will"):find("Phase 2: 0/1 rolls", 1, true));
+assert(not R:acceptRoll({ player = "Thrall", amount = 90 }), "Thrall has 0 bonus rolls, cannot roll in Phase 2!");
+assert(R:acceptRoll({ player = "Arthas", amount = 91 }));
+assert(not R:acceptRoll({ player = "Arthas", amount = 92 }), "Arthas has 1 bonus roll, 2nd roll rejected!");
+assert(R:getStatusText("Deathbringer's Will"):find("Phase 2: 1/1 (All in!)", 1, true));
 print("Test 9 passed!");
 
 print("--- Test 10: Slash Command /gl rsr & Auto-Broadcast ---");
@@ -398,7 +392,7 @@ R:handleWhisperCommand("!rsr", "Thrall-Whitemane");
 assert(#chatLog == 1, "Should reply to !rsr whisper!");
 assert(chatLog[1].channel == "WHISPER");
 assert(chatLog[1].target == "Thrall-Whitemane");
-assert(chatLog[1].msg:find("deathbringer's will (+2 bonus, 3 Phase 2 rolls)", 1, true));
+assert(chatLog[1].msg:find("deathbringer's will (+2 bonus roll(s) in Phase 2; Phase 1 roll stands)", 1, true));
 
 chatLog = {};
 R:handleWhisperCommand("!rsr", "Dyalalt");
@@ -432,7 +426,7 @@ print("Test 19 passed!");
 print("--- Test 20: Realm-Qualified Player Name Disambiguation ---");
 assert(R:isGuildPlayer("Thrall-Whitemane") == true);
 assert(R:getExtraRolls("Thrall-Whitemane", "Deathbringer's Will") == 2);
-assert(R:allowedPhase2Rolls("Thrall-Whitemane", "Deathbringer's Will") == 3);
+assert(R:allowedPhase2Rolls("Thrall-Whitemane", "Deathbringer's Will") == 2);
 print("Test 20 passed!");
 
 print("--- Test 21: Phase 2 Tie Between Guild Members ---");
@@ -570,11 +564,11 @@ assert(R:getExtraRolls("Dyalalt", "Phylactery of the Nameless Lich") == 0, "When
 R:handleCommand("altrolls on");
 assert(R.altsAccrueRolls == true, "/rsr altrolls on must enable altsAccrueRolls!");
 assert(R:getExtraRolls("Dyalalt", "Phylactery of the Nameless Lich") == 2, "When altsAccrueRolls is true, Alt gets their stored +2 bonus rolls!");
-assert(R:allowedPhase2Rolls("Dyalalt", "Phylactery of the Nameless Lich") == 3, "Alt gets 1 + 2 = 3 rolls in Phase 2 when no Main reserved the item!");
+assert(R:allowedPhase2Rolls("Dyalalt", "Phylactery of the Nameless Lich") == 2, "Alt gets 2 bonus rolls in Phase 2 when no Main reserved the item!");
 -- Verify Alt STILL cannot roll in Phase 2 when a Main reserved the item (Deathbringer's Will)
 mockRollOff.CurrentRollOff.itemName = "Deathbringer's Will";
 assert(R:isPhase2Eligible("Dyalalt") == false, "Even with altrolls ON, Alt can never win over a Main!");
--- Verify Alt CAN roll 3 times in Phase 2 when NO Main reserved the item (Phylactery of the Nameless Lich)
+-- Verify Alt CAN roll 2 bonus rolls in Phase 2 when NO Main reserved the item (Phylactery of the Nameless Lich)
 mockRollOff.CurrentRollOff.itemName = "Phylactery of the Nameless Lich";
 assert(R:isPhase2Eligible("Dyalalt") == true, "Alt is Phase 2 eligible when no Main reserved the item!");
 R:handleCommand("altrolls off");
@@ -605,4 +599,173 @@ R:handleCommand("simwon");
 assert(R:getAwardExportString():find("Brutality Blade", 1, true) ~= nil, "/rsr simwon should record a won item for /rsr won!");
 print("Test 27 passed!");
 
-print("\nALL 27 ROLLING SR UNIT TESTS PASSED SUCCESSFULLY!");
+print("--- Test 28: Phase 1 Winning Roll Beats Phase 2 Bonus Rolls ---");
+R:handleCommand("clear");
+R:parseImportString("MemberA:Brutality Blade=0;MemberB:Brutality Blade=2;");
+mockSoftRes._byItemID = { [18832] = { "MemberA", "MemberB", "Pugman" } };
+mockSoftRes.byItemID = function (_, id) return mockSoftRes._byItemID[id] or {}; end;
+mockRollOff.CurrentRollOff.itemID = 18832;
+mockRollOff.CurrentRollOff.itemName = "Brutality Blade";
+mockRollOff.CurrentRollOff.itemLink = "[Brutality Blade]";
+mockRollOff.CurrentRollOff.Rolls = {};
+
+-- Phase 1
+R:beginPhase1();
+local rP1_A = { player = "MemberA", amount = 95 };
+local rP1_B = { player = "MemberB", amount = 40 };
+local rP1_Pug = { player = "Pugman", amount = 50 };
+assert(R:acceptRoll(rP1_A));
+assert(R:acceptRoll(rP1_B));
+assert(R:acceptRoll(rP1_Pug));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rP1_A);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rP1_B);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rP1_Pug);
+
+-- Stop Phase 1 -> MemberA (95) beats Pug (50) -> transitions to Phase 2!
+assert(R:handleStop(mockRollOff.CurrentRollOff) == true);
+assert(R:isPhase2() == true);
+
+-- In Phase 2, MemberA (+0) cannot roll; MemberB (+2) rolls 2 bonus rolls
+assert(not R:acceptRoll({ player = "MemberA", amount = 99 }), "MemberA has 0 bonus rolls, Phase 2 roll must be blocked!");
+local rP2_B1 = { player = "MemberB", amount = 70 };
+local rP2_B2 = { player = "MemberB", amount = 88 };
+assert(R:acceptRoll(rP2_B1));
+assert(R:acceptRoll(rP2_B2));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rP2_B1);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rP2_B2);
+assert(not R:acceptRoll({ player = "MemberB", amount = 100 }), "MemberB only has 2 bonus rolls, 3rd Phase 2 roll blocked!");
+
+-- Stop Phase 2 -> MemberA's Phase 1 roll (95) beats MemberB's Phase 2 rolls (70, 88)!
+chatLog = {};
+assert(R:handleStop(mockRollOff.CurrentRollOff) == false);
+assert(not R:isActive());
+local foundAWin = false;
+for _, entry in ipairs(chatLog) do
+    if entry.msg:find("MemberA wins") and entry.msg:find("95") then
+        foundAWin = true;
+    end
+end
+assert(foundAWin, "MemberA must win with their Phase 1 roll of 95 when Phase 2 bonus rolls do not beat it!");
+mockSoftRes.byItemID = nil;
+print("Test 28 passed!");
+
+print("--- Test 29: Recruits on Trial — 1 Roll in Phase 1, Phase 1 Stands in Phase 2, 0 Bonus Rolls ---");
+R:handleCommand("clear");
+R:parseImportString("Thrall:Brutality Blade=2;Newbie*recruit:Brutality Blade=0;");
+assert(R:isRecruit("Newbie") == true, "Newbie must be identified as Recruit!");
+assert(R:isRecruit("Thrall") == false, "Thrall is Member, not Recruit!");
+assert(R:isMember("Thrall") == true, "Thrall must be Member!");
+assert(R:isMember("Newbie") == false, "Newbie is Recruit, not full Member!");
+assert(R:isGuildPlayer("Newbie") == true, "Newbie is a guild player!");
+assert(R:getExtraRolls("Newbie", "Brutality Blade") == 0, "Recruits on trial have +0 bonus rolls!");
+assert(R:allowedPhase2Rolls("Newbie", "Brutality Blade") == 0);
+
+-- 29a: Full Guild Run — Recruit wins Phase 1, Phase 1 stands, Recruit wins if not beaten in Phase 2
+mockSoftRes._byItemID = { [18832] = { "Thrall", "Newbie" } };
+mockSoftRes.byItemID = function (_, id) return mockSoftRes._byItemID[id] or {}; end;
+mockRollOff.CurrentRollOff.itemID = 18832;
+mockRollOff.CurrentRollOff.itemName = "Brutality Blade";
+mockRollOff.CurrentRollOff.itemLink = "[Brutality Blade]";
+mockRollOff.CurrentRollOff.Rolls = {};
+
+R:beginPhase1();
+local rRecruitP1 = { player = "Newbie", amount = 95 };
+local rThrallP1 = { player = "Thrall", amount = 50 };
+assert(R:acceptRoll(rRecruitP1) == true, "Recruit CAN roll in Phase 1 of Full Guild Run!");
+assert(R:acceptRoll(rThrallP1) == true, "Member can roll in Phase 1 of Full Guild Run!");
+tinsert(mockRollOff.CurrentRollOff.Rolls, rRecruitP1);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallP1);
+
+-- Stop Phase 1 -> Recruit won Phase 1 -> moves to Phase 2!
+assert(R:handleStop(mockRollOff.CurrentRollOff) == true, "Recruit winning Phase 1 moves to Phase 2!");
+assert(R:isPhase2() == true);
+assert(R:isPhase2Eligible("Newbie") == true, "Recruit is Phase 2 eligible (Phase 1 roll stands)!");
+assert(R:isPhase2Eligible("Thrall") == true);
+
+-- In Phase 2: Recruit has 0 bonus rolls (cannot roll, 95 stands). Thrall rolls bonus rolls.
+assert(not R:acceptRoll({ player = "Newbie", amount = 99 }), "Recruit has 0 bonus rolls, Phase 2 roll blocked!");
+local rThrallB1 = { player = "Thrall", amount = 65 };
+local rThrallB2 = { player = "Thrall", amount = 80 };
+assert(R:acceptRoll(rThrallB1));
+assert(R:acceptRoll(rThrallB2));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallB1);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallB2);
+
+-- Stop Phase 2 -> Recruit's Phase 1 roll (95) beats Thrall's rolls -> Recruit wins!
+chatLog = {};
+assert(R:handleStop(mockRollOff.CurrentRollOff) == false);
+local foundRecruitWin = false;
+for _, entry in ipairs(chatLog) do
+    if entry.msg:find("Newbie wins") and entry.msg:find("95") then
+        foundRecruitWin = true;
+    end
+end
+assert(foundRecruitWin, "Recruit must win with Phase 1 roll of 95 when not beaten in Phase 2!");
+
+-- 29b: Member beats Recruit in Phase 2
+mockRollOff.CurrentRollOff.Rolls = {};
+R:beginPhase1();
+local rRecruitP1_b = { player = "Newbie", amount = 85 };
+local rThrallP1_b = { player = "Thrall", amount = 50 };
+assert(R:acceptRoll(rRecruitP1_b));
+assert(R:acceptRoll(rThrallP1_b));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rRecruitP1_b);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallP1_b);
+assert(R:handleStop(mockRollOff.CurrentRollOff) == true);
+assert(R:isPhase2() == true);
+local rThrallBeat = { player = "Thrall", amount = 92 };
+assert(R:acceptRoll(rThrallBeat));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallBeat);
+chatLog = {};
+assert(R:handleStop(mockRollOff.CurrentRollOff) == false);
+local foundThrallWin = false;
+for _, entry in ipairs(chatLog) do
+    if entry.msg:find("Thrall wins") and entry.msg:find("92") then
+        foundThrallWin = true;
+    end
+end
+assert(foundThrallWin, "Member must win when their Phase 2 roll beats Recruit's Phase 1 roll!");
+
+-- 29c: Pugs Present — Recruit beats Pug in Phase 1 -> Phase 2
+mockSoftRes._byItemID = { [18832] = { "Thrall", "Newbie", "Pugman" } };
+mockRollOff.CurrentRollOff.Rolls = {};
+R:beginPhase1();
+local rRecP1_c = { player = "Newbie", amount = 95 };
+local rPugP1_c = { player = "Pugman", amount = 70 };
+local rThrallP1_c = { player = "Thrall", amount = 50 };
+assert(R:acceptRoll(rRecP1_c));
+assert(R:acceptRoll(rPugP1_c));
+assert(R:acceptRoll(rThrallP1_c));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rRecP1_c);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rPugP1_c);
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallP1_c);
+
+-- Stop Phase 1 -> Recruit (95) beats Pug (70) -> Pug eliminated -> Phase 2!
+assert(R:handleStop(mockRollOff.CurrentRollOff) == true);
+assert(R:isPhase2() == true);
+assert(R:isPhase2Eligible("Newbie") == true);
+
+-- In Phase 2: Thrall rolls 80
+local rThrallB_c = { player = "Thrall", amount = 80 };
+assert(R:acceptRoll(rThrallB_c));
+tinsert(mockRollOff.CurrentRollOff.Rolls, rThrallB_c);
+
+chatLog = {};
+assert(R:handleStop(mockRollOff.CurrentRollOff) == false);
+local foundRecWinPug = false;
+for _, entry in ipairs(chatLog) do
+    if entry.msg:find("Newbie wins") and entry.msg:find("95") then
+        foundRecWinPug = true;
+    end
+end
+assert(foundRecWinPug, "Recruit must win with 95 over Pug and Member!");
+
+-- 29d: Whisper Replies for Recruit
+chatLog = {};
+R:handleWhisperCommand("!rsr", "Newbie");
+assert(#chatLog == 1 and chatLog[1].msg:find("Phase 1 roll stands in Phase 2"), "Whisper must note Phase 1 roll stands in Phase 2!");
+
+mockSoftRes.byItemID = nil;
+print("Test 29 passed!");
+
+print("\nALL 29 ROLLING SR UNIT TESTS PASSED SUCCESSFULLY!");

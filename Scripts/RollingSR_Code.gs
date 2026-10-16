@@ -1165,11 +1165,11 @@ function writeAddonExport(ss) {
 
     var isAlt = isAltStatus(e.status);
 
-    // Skip non-alt players with no active reservations.
-    // Alts are always exported (even with empty items) so Gargul recognizes them as Guild Alts in Phase 1.
-    if (!isAlt && !e.item1 && !e.item2) return;
-
     var recruitInTrial = isRecruitInTrial(e);
+
+    // Skip non-alt, non-recruit players with no active reservations.
+    // Alts and Recruits in trial are always exported (even with empty items) so Gargul recognizes their status in Phase 1.
+    if (!isAlt && !recruitInTrial && !e.item1 && !e.item2) return;
 
     var items = [];
     if (e.item1) {
@@ -1181,8 +1181,8 @@ function writeAddonExport(ss) {
       items.push(e.item2 + "=" + r2);
     }
 
-    var tag = isAlt ? "*alt" : "";
-    if (items.length > 0 || isAlt) {
+    var tag = isAlt ? "*alt" : (recruitInTrial ? "*recruit" : "");
+    if (items.length > 0 || isAlt || recruitInTrial) {
       parts.push(name + tag + ":" + items.join(","));
     }
   });

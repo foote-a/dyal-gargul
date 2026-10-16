@@ -246,7 +246,7 @@ function RollOff:postStartMessage(itemLink, time, note)
     local announceMessage;
 
     if (isRollingSR) then
-        announceMessage = ("Rolling SR Phase 1: Soft-reservists, /roll on %s!"):format(itemLink);
+        announceMessage = ("Rolling SR Phase 1: Reserving players, /roll on %s!"):format(itemLink);
         if (type(note) == "string" and not GL:empty(note)) then
             announceMessage = announceMessage .. " - " .. note;
         end

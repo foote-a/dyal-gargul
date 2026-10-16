@@ -38,7 +38,7 @@
 ## 1. Core Concepts, Mains vs. Alts, & Rules
 
 - **2 Soft Reserves (SRs) per player per week.**
-- **Roll Accumulation & Configurable Cap:** Reserving the same unwon item week-over-week on a **Main** grants **`+1` extra roll** for subsequent weeks, up to a configurable cap (default **`100`**, controlled via `MAX_EXTRA_ROLLS` in `RollingSR_Code.gs` and `/rsr max <num>` in-game).
+- **Roll Accumulation & Configurable Cap:** Reserving the same item without winning it week-over-week on a **Main** grants **`+1` extra roll** for subsequent weeks, up to a configurable cap (default **`100`**, controlled via `MAX_EXTRA_ROLLS` in `RollingSR_Code.gs` and `/rsr max <num>` in-game).
 - **Mains vs. Alts Rules:**
   1. **No Shared Rolls:** Alts and Mains have separate entries and never share accumulated rolls.
   2. **Configurable Alt Roll Accumulation (`ALTS_ACCRUE_ROLLS = false` by default):**
@@ -50,25 +50,31 @@
      - An Alt winning Phase 1 is treated identically to a Guild Main winning Phase 1: Pugs are eliminated and the roll-off advances to **Phase 2**.
      - In **Phase 2**, if *any* Guild Main reserved the item, **only Mains** are eligible to win (the Alt's Phase 1 roll cannot beat a Main). If *no* Guild Mains reserved the item, the Alt(s) can win it.
      - If *no* Pugs reserved the item and a Guild Main reserved it, Alts do not roll in Phase 1.
-- **Pug Isolation:** Pugs are never added to the Google Sheet. In-game, Gargul dynamically recognizes any reservist not in the guild export string as a Pug.
+- **Recruit Trial Rules (2-Week Trial Period):**
+  1. **Phase 1 Baseline Roll:** Recruits and Pugs are treated the same during Phase 1: everyone gets **1 baseline roll** (`/roll 1-100`).
+  2. **Phase 2 Transition & Standing Roll:** If a recruit wins Phase 1 (or ties with a guild member), the roll-off advances to **Phase 2**.
+     - In Phase 2, guild members roll their bonus rolls. Recruits roll with `+0` bonus rolls during their 2-week trial, but their **Phase 1 roll still counts**.
+     - If no guild member beats the recruit's Phase 1 roll, the recruit wins the item.
+  3. **Rolls Accrue in Background:** In both full guild runs and pug runs, recruits submit soft reserves and accrue `+1` bonus roll per week kept without winning. These rolls cannot be spent until their 2-week trial ends and an officer promotes them to Member.
+- **Pug Isolation:** Pugs are never added to the Google Sheet. In-game, Gargul dynamically recognizes any player not in the guild export string as a Pug.
 - **Two-Phase Rolling (No Timers — 100% Manual ML Control):**
-  1. **Phase 1 (All Eligible Reservists):** Everyone gets **1 roll** (`/roll 1-100`).
+  1. **Phase 1 (All Reserving Players):** Everyone who reserved the item gets **1 roll** (`/roll 1-100`).
      - **Pug Wins Outright:** The Pug has the highest roll. The item is awarded immediately (Phase 2 does not happen).
-     - **Pug Ties with Guild Member/Alt:** Gargul starts a tie-break round between the tied players only.
-     - **Guild Main or Alt Wins (or Guild-Only Tie):** Gargul advances to **Phase 2**.
-  2. **Phase 2 (Guild Reservists Only):** Eligible guild members roll their bonus rolls (up to `1 + ExtraRolls` total rolls in Phase 2). The highest valid roll across Phase 1 and Phase 2 wins.
+     - **Pug Ties with Guild Member/Alt/Recruit:** Gargul starts a tie-break round between the tied players only.
+     - **Guild Member, Recruit, or Alt Wins (or Guild-Only Tie):** Gargul advances to **Phase 2**.
+  2. **Phase 2 (Guild Players Only):** Eligible guild members roll only their bonus rolls (`ExtraRolls` bonus rolls in Phase 2; Phase 1 rolls stand as potential winning candidates). Guild members or recruits with `+0` bonus rolls do not roll in Phase 2, but their Phase 1 roll remains eligible to win. The highest valid roll across Phase 1 and Phase 2 wins.
 
 ### Streak, Status & Attendance Lifecycle
 | Trigger / Status | Behavior |
 |:---|:---|
-| **Item Kept (Unwon)** | Gaining `+1` extra roll next week (capped at `MAX_EXTRA_ROLLS = 100`). |
+| **Item Not Won (Kept)** | Gaining `+1` extra roll next week (capped at `MAX_EXTRA_ROLLS = 100`). |
 | **Item Changed or Dropped** | Extra rolls reset to `0` for that slot. |
 | **Item Won** | Extra rolls reset to `0` in Gargul upon award; export with **`/rsr won`** after raid to auto-update the sheet. |
 | **1 Missed Raid** | Rolls preserved (1-week grace period); `Consecutive_Misses` set to `1`. |
 | **2+ Consecutive Misses** | All extra rolls reset to `0`. |
 | **Benched Status** | Marked as `Benched` before processing; keeps items, gains `+1` roll, accrues `0` misses. |
 | **Excused Absence** | Officer runs **🌴 Excuse Absence / Vacation**; resets consecutive misses to `0` to protect streak. |
-| **Recruit Trial Period** | Extra rolls accumulate internally in the sheet, but export as `0` until 2 weeks have elapsed. |
+| **Recruit Trial Period** | Treated same as Pugs in Phase 1 (1 roll). If recruit wins Phase 1, moves to Phase 2 where their Phase 1 roll stands (0 bonus rolls). Extra rolls accrue in background and unlock after 2-week trial upon promotion to Member. |
 
 ---
 
@@ -151,19 +157,19 @@ The system supports up to 4 raids running simultaneously:
    - Raiders can whisper `!rsr`, `!rolls`, or `!sr` to the Master Looter at any time to receive an automatic whisper reply with their reserved items and Phase 2 roll counts.
 
 ### Phase B: During the Raid (In-Game Roll-Offs)
-1. **Tooltip Verification:** Hovering any soft-reserved item shows each reservist's status:
+1. **Tooltip Verification:** Hovering any soft-reserved item shows each player's status:
    - `Thrall (+2 bonus)` (Green — Main with bonus rolls)
    - `Jaina (+0)` (Gray — Main with 0 bonus rolls)
    - `Dyalalt (Alt)` (Light Blue — Guild Alt)
    - `PugWarrior (Pug)` (Orange — Pug)
-2. **Phase 1 (All Eligible Reservists):**
+2. **Phase 1 (All Reserving Players):**
    - Alt + Left-Click the item in the boss loot window (or your bags). The ML window displays `Phase 1: X/Y rolled` in real time and sets the stop button to **`Stop Phase 1`**.
    - Click **`Stop Phase 1`** when rolls are in:
      - **Pug Wins Outright:** Gargul announces the Pug winner and ends the roll-off.
      - **Pug Ties:** Gargul announces a tie-break round (`Tie-Break: X/Y rolled`) and changes the button to **`End Tie-Break`**.
      - **Guild Main or Alt Wins:** Gargul transitions to **Phase 2**.
-3. **Phase 2 (Guild Reservists Only):**
-   - Gargul announces Phase 2 and prints each eligible guild member's total allowed rolls (`1 + ExtraRolls`). If any Main reserved the item, Alts cannot roll or win in Phase 2.
+3. **Phase 2 (Guild Players Only):**
+   - Gargul announces Phase 2 and prints each eligible guild member's bonus roll allowance (with Phase 1 rolls standing). If any Main reserved the item, Alts cannot roll or win in Phase 2.
    - The ML window tracks bonus rolls live (`Phase 2: X/Y (All in!)`).
    - Click **`Stop Phase 2`** when complete, then click **`Award`**. Gargul resets the winner's extra rolls for that item to `0` and logs the award for `/rsr won`.
 
@@ -260,13 +266,13 @@ Players in the raid can use the following whispers, rolls, and slash commands at
 #### 1. Whisper Commands (Send to the Master Looter)
 | Whisper Command | Aliases | What the Player Receives Back |
 |:---|:---|:---|
-| **`!rsr`** | **`!rolls`**, **`!rollingsr`** | Automatic whisper showing their status (**Guild Main**, **Guild Alt**, or **Pug**) and each soft-reserved item with its accumulated bonus rolls and total Phase 2 roll allowance (`1 + ExtraRolls`). |
+| **`!rsr`** | **`!rolls`**, **`!rollingsr`** | Automatic whisper showing their status (**Guild Main**, **Guild Alt**, or **Pug**) and each soft-reserved item with its accumulated bonus rolls in Phase 2 (while Phase 1 rolls stand). |
 | **`!sr`** | **`!softres`**, **`!softreserve`** | Automatic whisper showing the exact item links they soft-reserved this week along with their `(+X bonus)` or `(Alt)` badge. |
 
 #### 2. Rolling Commands (During an Active Roll-Off)
 | Command | When to Use |
 |:---|:---|
-| **`/roll`** (or **`/roll 1-100`**) | **Main Spec / Soft Reserve Roll (`1-100`):** Used by all reservists once in **Phase 1**, by tied players in a **Tie-Break Round**, and by eligible Guild reservists up to `1 + ExtraRolls` times in **Phase 2** (or click the **Main Spec** roll button in Gargul's popup Roll window). |
+| **`/roll`** (or **`/roll 1-100`**) | **Main Spec / Soft Reserve Roll (`1-100`):** Used by all reserving players once in **Phase 1**, by tied players in a **Tie-Break Round**, and by eligible Guild players casting their bonus rolls in **Phase 2** (or click the **Main Spec** roll button in Gargul's popup Roll window). |
 | **`/roll 99`** (or **`/roll 1-99`**) | **Off-Spec Roll (`1-99`):** Used for Off-Spec rolls on open/unreserved items (or click the **Off Spec** button in Gargul's Roll window). |
 
 #### 3. Player UI Slash Commands (`/gl`)
@@ -410,4 +416,4 @@ Gargul launches a tie-break round between the tied players only. If the Pug wins
 Gargul skips the Phase 1 tie-break and advances directly to Phase 2, where guild members use their bonus rolls.
 
 #### What happens if a player rolls more than their allowed count in Phase 2?
-Gargul enforces `1 + ExtraRolls` per player in Phase 2 and automatically ignores any extra `/roll` spam beyond their limit.
+Gargul enforces the exact bonus roll limit (`ExtraRolls`) per player in Phase 2 and automatically ignores any extra `/roll` spam beyond their limit.
