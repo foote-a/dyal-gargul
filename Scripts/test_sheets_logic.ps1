@@ -1,4 +1,4 @@
-# Test suite for Rolling SR Google Apps Script business logic
+# Test suite for Soft Reserve+ Google Apps Script business logic
 
 $testsPassed = 0
 $testsTotal = 0
@@ -13,7 +13,7 @@ function Assert-Equal($actual, $expected, $message) {
     }
 }
 
-Write-Host "=== Rolling SR Google Sheet Logic Tests ===" -ForegroundColor Cyan
+Write-Host "=== Soft Reserve+ Google Sheet Logic Tests ===" -ForegroundColor Cyan
 
 # Rule 1: Same item reserved again -> +1 roll
 $prevItem = "Deathbringer's Will"
@@ -221,9 +221,9 @@ $prevAtCap = 100
 $nextRolls = [Math]::Min($prevAtCap + 1, $maxExtraRolls)
 Assert-Equal $nextRolls 100 "Accumulated extra rolls cap at MAX_EXTRA_ROLLS (100)"
 
-# Rule 19: Automated Won Items String Import (/rsr won -> applyWonItemsString)
-$wonString = "/rsr won Thrall:Deathbringer's Will;Jaina:Phylactery of the Nameless Lich;"
-$cleanedWon = $wonString -replace "^/?(?:gl\s+)?rsr\s+won\s*", ""
+# Rule 19: Automated Won Items String Import (/srp won / /rsr won -> applyWonItemsString)
+$wonString = "/srp won Thrall:Deathbringer's Will;Jaina:Phylactery of the Nameless Lich;"
+$cleanedWon = $wonString -replace "^/?(?:gl\s+)?(?:rsr|srp|srplus|softreserveplus)\s+won\s*", ""
 $rosterSim = @{
     "Thrall" = @{ Item1 = "Deathbringer's Will"; Rolls1 = 3; Item2 = "Shadowmourne"; Rolls2 = 2 }
     "Jaina"  = @{ Item1 = "Archus, Greatstaff of Antonidas"; Rolls1 = 1; Item2 = "Phylactery of the Nameless Lich"; Rolls2 = 4 }
@@ -246,7 +246,7 @@ foreach ($pair in $cleanedWon.Split(";")) {
     }
 }
 Assert-Equal $rosterSim["Thrall"].Rolls1 0 "/rsr won string automatically resets Thrall's won item rolls to 0"
-Assert-Equal $rosterSim["Thrall"].Rolls2 2 "/rsr won string preserves Thrall's unwon item slot rolls (2)"
+Assert-Equal $rosterSim["Thrall"].Rolls2 2 "/rsr won string preserves Thrall's other item slot rolls (2)"
 Assert-Equal $rosterSim["Jaina"].Rolls2 0 "/rsr won string automatically resets Jaina's won item rolls to 0"
 
 # Rule 20: Live Syntax & Token Balance Verification of Scripts/RollingSR_Code.gs

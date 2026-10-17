@@ -171,7 +171,7 @@ function GL:_init()
         -- Show a welcome message
         if (self.Settings:get("welcomeMessage")) then
             local cc = self.Data.Constants.commandHexColor;
-            GL:message("|c00" .. self.Data.Constants.addonHexColor .. (L["Use |c00%s/gl|r to open Gargul. New to Gargul? Try |c00%s/gl start|r!"]):format(cc, cc));
+            GL:message("|c00" .. self.Data.Constants.addonHexColor .. (L["Use |c00%s/rsr|r to open Soft Reserve+ (or |c00%s/gl|r for Gargul). Try |c00%s/rsr test|r for solo test mode!"]):format(cc, cc, cc));
         end
 
         if (GL.AutoRoll:enabled()) then
@@ -261,8 +261,14 @@ GL.Ace:RegisterChatCommand("gdkp", function (...)
     GL.Commands:call("gdkp");
 end);
 
--- Register the rsr slash command
+-- Register the rsr, srp, and srplus slash commands
 GL.Ace:RegisterChatCommand("rsr", function (...)
+    GL.RollingSR:handleCommand(...);
+end);
+GL.Ace:RegisterChatCommand("srp", function (...)
+    GL.RollingSR:handleCommand(...);
+end);
+GL.Ace:RegisterChatCommand("srplus", function (...)
     GL.RollingSR:handleCommand(...);
 end);
 

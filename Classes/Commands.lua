@@ -40,7 +40,7 @@ GL.Commands = GL.Commands or {
         resetui = "Reset Gargul's UI sizes and positions. Useful in case something went out of bounds!",
         resetsettings = "Reset Gargul's settings. This can't be undone!",
         rolloff = "Open the RollOff UI where you can announce an item for players to roll on: /gl award [itemLink?]",
-        rollingsr = "Manage Rolling SR bonus rolls, won-item exports, and solo test mode (/rsr or /gl rsr)",
+        rollingsr = "Manage Soft Reserve+ bonus rolls, won-item exports, and solo test mode (/rsr, /srp, or /gl rsr)",
         rolls = "Reopen the roll window of the current (or last) roll off, rolls included. Useful if you closed it by accident or want to check the rolls again",
         settings = "Open the settings menu",
         start = "Open the quick start guide for GDKP, Softres, auto looting and auto roll",
@@ -137,9 +137,12 @@ GL.Commands = GL.Commands or {
         ro = "rolloff",
         roll = "rolloff",
 
-        -- rollingsr
+        -- rollingsr / softreserveplus
         rsr = "rollingsr",
         rollingsr = "rollingsr",
+        srp = "rollingsr",
+        srplus = "rollingsr",
+        softreserveplus = "rollingsr",
 
         -- settings
         co = "settings",
@@ -338,7 +341,7 @@ GL.Commands = GL.Commands or {
         -- Check if everyone is running the most up-to-date version
         inspect = function (...) GL.BagInspector:inspect(...); end,
 
-        -- Rolling SRloot system
+        -- Soft Reserve+ loot system
         rollingsr = function (...) GL.RollingSR:handleCommand(...); end,
     }
 };

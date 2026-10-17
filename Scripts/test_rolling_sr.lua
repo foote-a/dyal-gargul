@@ -376,14 +376,14 @@ mockSoftRes.importCSVData = function (_, data) importedCSV = data; return true; 
 GL.User.name = "MyTester";
 R:handleCommand("test");
 assert(R:countPlayers() == 3, "Test mode should load 3 guild characters (2 Mains + 1 Alt)!");
-assert(R:getExtraRolls("MyTester", "Brutality Blade") == 2, "Tester should have 2 bonus rolls!");
-assert(R:getExtraRolls("Guildmate", "Brutality Blade") == 1, "Guildmate should have 1 bonus roll!");
-assert(R:isAlt("Guildalt") == true and R:getExtraRolls("Guildalt", "Brutality Blade") == 0, "Guildalt should be an Alt with 0 bonus rolls!");
+assert(R:getExtraRolls("MyTester", "Hearthstone") == 2, "Tester should have 2 bonus rolls!");
+assert(R:getExtraRolls("Guildmate", "Hearthstone") == 1, "Guildmate should have 1 bonus roll!");
+assert(R:isAlt("Guildalt") == true and R:getExtraRolls("Guildalt", "Hearthstone") == 0, "Guildalt should be an Alt with 0 bonus rolls!");
 assert(not R:isGuildPlayer("Pugman"), "Pugman should not be a guild player (treated as Pug)!");
-assert(importedCSV ~= nil and importedCSV:find("Brutality Blade") and importedCSV:find("Talisman of Ephemeral Power"), "SoftRes CSV should load Vanilla Molten Core items!");
+assert(importedCSV ~= nil and importedCSV:find("Hearthstone") and importedCSV:find("Skinning Knife"), "SoftRes CSV should load Hearthstone and Skinning Knife!");
 
 mockRollOff.inProgress = true;
-mockRollOff.CurrentRollOff.itemName = "Brutality Blade";
+mockRollOff.CurrentRollOff.itemName = "Hearthstone";
 mockRollOff.CurrentRollOff.Rolls = {};
 R:beginPhase1();
 R:handleCommand("sim");
@@ -586,9 +586,9 @@ print("Test 26 passed!");
 print("--- Test 27: In-Game Simulator Modes (/rsr simpug, /rsr simalt, /rsr simwon) ---");
 R:handleCommand("test");
 mockRollOff.inProgress = true;
-mockRollOff.CurrentRollOff.itemID = 18832;
-mockRollOff.CurrentRollOff.itemName = "Brutality Blade";
-mockRollOff.CurrentRollOff.itemLink = "[Brutality Blade]";
+mockRollOff.CurrentRollOff.itemID = 6948;
+mockRollOff.CurrentRollOff.itemName = "Hearthstone";
+mockRollOff.CurrentRollOff.itemLink = "[Hearthstone]";
 mockRollOff.CurrentRollOff.Rolls = {};
 mockRollOff.processRoll = function (_, msg)
     local p, amt = msg:match("^(%S+) rolls (%d+)");
@@ -603,7 +603,7 @@ R:beginPhase1();
 R:handleCommand("simpug");
 assert(R:handleStop(mockRollOff.CurrentRollOff) == false, "/rsr simpug should result in Pugman winning Phase 1 outright!");
 R:handleCommand("simwon");
-assert(R:getAwardExportString():find("Brutality Blade", 1, true) ~= nil, "/rsr simwon should record a won item for /rsr won!");
+assert(R:getAwardExportString():find("Hearthstone", 1, true) ~= nil, "/rsr simwon should record a won item for /rsr won!");
 print("Test 27 passed!");
 
 print("--- Test 28: Phase 1 Winning Roll Beats Phase 2 Bonus Rolls ---");
@@ -827,4 +827,66 @@ mockSoftRes.itemIDIsReservedByPlayer = nil;
 mockSoftRes.materializeData = nil;
 print("Test 30 passed!");
 
-print("\nALL 30 ROLLING SR UNIT TESTS PASSED SUCCESSFULLY!");
+print("--- Test 31: Roll-Off Subcommands (/rsr ro, /rsr roll, /rsr <itemID>) ---");
+local drawnItem = nil;
+GL.MasterLooterUI = {
+    draw = function (_, item)
+        drawnItem = item or true;
+    end,
+};
+
+drawnItem = nil;
+R:handleCommand("ro 18832");
+assert(drawnItem == "18832", "ro 18832 must call MasterLooterUI:draw('18832')!");
+
+drawnItem = nil;
+R:handleCommand("roll 18832");
+assert(drawnItem == "18832", "roll 18832 must call MasterLooterUI:draw('18832')!");
+
+drawnItem = nil;
+R:handleCommand("18832");
+assert(drawnItem == "18832", "direct itemID 18832 must call MasterLooterUI:draw('18832')!");
+
+drawnItem = nil;
+R:handleCommand("[Brutality Blade]");
+assert(drawnItem == "[Brutality Blade]", "direct itemLink must call MasterLooterUI:draw('[Brutality Blade]')!");
+
+drawnItem = nil;
+R:handleCommand("ro");
+assert(drawnItem == true, "/rsr ro without item must call MasterLooterUI:draw()!");
+
+GL.MasterLooterUI = nil;
+print("Test 31 passed!");
+
+print("--- Test 32: Full Slash Command Alias Interchangeability (/srp, /srplus, /rsr) ---");
+GL.MasterLooterUI = {
+    draw = function (_, item)
+        drawnItem = item or true;
+    end,
+};
+
+-- Simulate /srp ro 6948
+drawnItem = nil;
+R:handleCommand("ro 6948");
+assert(drawnItem == "6948", "/srp ro 6948 must execute cleanly!");
+
+-- Simulate /srp test
+R:handleCommand("test");
+assert(R.testMode == true, "/srp test must enable test mode!");
+
+-- Simulate /srp altrolls on
+R:handleCommand("altrolls on");
+assert(R.altsAccrueRolls == true, "/srp altrolls on must enable alt bonus rolls!");
+
+-- Simulate /srp max 50
+R:handleCommand("max 50");
+assert(R.maxExtraRolls == 50, "/srp max 50 must set cap to 50!");
+
+-- Simulate /srp clear
+R:handleCommand("clear");
+assert(R:countPlayers() == 0, "/srp clear must clear all data!");
+
+GL.MasterLooterUI = nil;
+print("Test 32 passed!");
+
+print("\nALL 32 SOFT RESERVE+ UNIT TESTS PASSED SUCCESSFULLY!");

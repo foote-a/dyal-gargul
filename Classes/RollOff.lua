@@ -188,7 +188,7 @@ function RollOff:announceStart(itemLink, time, note)
         self.BoostedRangeCache.RangePerPlayer = RangePerPlayer;
     end
 
-    GL.CommMessage.new({
+    local commMsg = GL.CommMessage.new({
         action = CommActions.startRollOff,
         content = {
             item = dehydratedLink,
@@ -200,14 +200,24 @@ function RollOff:announceStart(itemLink, time, note)
             b = b,
         },
         channel = "GROUP",
-    }):send();
-
-    -- Timestamp used to measure our own echo round-trip (the SEND itself is auto-logged)
-    GL.CommRecorder.rollAnnounceAt = GetTime();
+        Sender = {
+            id = GL.User.id or 1,
+            name = GL.User.name or (UnitName and UnitName("player")) or "Tester",
+            fqn = GL.User.fqn or (UnitName and UnitName("player")) or "Tester",
+            isSelf = true,
+        },
+    });
 
     GL.Settings:set("UI.RollOff.timer", time);
 
-    self:armStartWatchdog();
+    if (GL.User.isInGroup) then
+        commMsg:send();
+        -- Timestamp used to measure our own echo round-trip (the SEND itself is auto-logged)
+        GL.CommRecorder.rollAnnounceAt = GetTime();
+        self:armStartWatchdog();
+    else
+        self:start(commMsg);
+    end
 
     return true;
 end
@@ -246,7 +256,7 @@ function RollOff:postStartMessage(itemLink, time, note)
     local announceMessage;
 
     if (isRollingSR) then
-        announceMessage = ("Rolling SR Phase 1: Reserving players, /roll on %s!"):format(itemLink);
+        announceMessage = ("Soft Reserve+ Phase 1: Reserving players, /roll on %s!"):format(itemLink);
         if (type(note) == "string" and not GL:empty(note)) then
             announceMessage = announceMessage .. " - " .. note;
         end
@@ -381,6 +391,11 @@ end
 function RollOff:announceStop()
     -- Phase 2 or tie-breaks run on the initiator's end, clients already stopped
     if (GL.RollingSR:runsLocally() and self:startedByMe()) then
+        self:stop();
+        return;
+    end
+
+    if (not GL.User.isInGroup) then
         self:stop();
         return;
     end
@@ -536,7 +551,7 @@ function RollOff:start(CommMessage)
                 GL.RollerUI:showRollAcceptedNotification();
             end
 
-            -- Make sure the rolloff stops when time is up (disabled for Rolling SR)
+            -- Make sure the rolloff stops when time is up (disabled for Soft Reserve+)
             if (not GL.RollingSR:isPhase1()) then
                 self.StopRollOffTimer = GL.Ace:ScheduleTimer(function ()
                     self:stop();
@@ -815,7 +830,7 @@ function RollOff:stop(CommMessage)
         return false;
     end
 
-    -- Rolling SR: manage phase transitions and tie-breaks (ML only)
+    -- Soft Reserve+: manage phase transitions and tie-breaks (ML only)
     if (self:startedByMe() and GL.RollingSR:isActive()) then
         if (GL.RollingSR:handleStop(self.CurrentRollOff)) then
             -- Phase 2 or tie-break started, keep roll-off alive
@@ -1217,13 +1232,35 @@ function RollOff:processRoll(message)
                 break;
             end
         end
+
+        -- Support simulated players during test mode or solo testing
+        if (not Roll and (not GL.User.isInGroup or (GL.RollingSR and GL.RollingSR.testMode))) then
+            local testClasses = {
+                pugman = "rogue",
+                guildalt = "hunter",
+                guildmate = "paladin",
+            };
+            local normName = strlower(rollerName);
+            if (testClasses[normName]) then
+                Roll = {
+                    player = roller,
+                    class = testClasses[normName],
+                    amount = roll,
+                    min = low,
+                    max = high,
+                    time = GetServerTime(),
+                    classification = RollType[1],
+                    priority = RollType[4],
+                };
+            end
+        end
     end
 
     if (not Roll) then
         return;
     end
 
-    -- Rolling SR: enforce per-phase roll limits
+    -- Soft Reserve+: enforce per-phase roll limits
     if (not GL.RollingSR:acceptRoll(Roll)) then
         return;
     end

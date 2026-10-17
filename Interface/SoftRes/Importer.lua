@@ -68,14 +68,14 @@ function Importer:draw()
         softReservesBoxContent = text;
     end)
 
-    -- Rolling SR extra rolls label
+    -- Soft Reserve+ extra rolls label
     local RollingSRLabel = AceGUI:Create("Label");
     RollingSRLabel:SetFontObject(_G.GameFontNormal);
     RollingSRLabel:SetFullWidth(true);
-    RollingSRLabel:SetText("Rolling SR: Paste the Weekly Extra Rolls String below (optional):");
+    RollingSRLabel:SetText("Soft Reserve+: Paste the Weekly Extra Rolls String below (optional):");
     Window:AddChild(RollingSRLabel);
 
-    -- Rolling SR extra rolls input
+    -- Soft Reserve+ extra rolls input
     local rollingExtraRollsContent = GL.RollingSR and GL.RollingSR.rawImportString or "";
     local RollingSRBox = AceGUI:Create("MultiLineEditBox");
     RollingSRBox:SetFullWidth(true);
@@ -112,7 +112,7 @@ function Importer:draw()
         local srText = strtrim(softReservesBoxContent or "");
         local rsrText = strtrim(rollingExtraRollsContent or "");
 
-        -- Route a Rolling SR string pasted into the top box to RollingSR
+        -- Route a Soft Reserve+ string pasted into the top box to RollingSR
         if (srText ~= "" and rsrText == "" and not srText:find("\n") and (srText:find("^[^:,;\n]+:[^=;\n]+=%s*%d+") or srText:find("^[^:,;\n]+%*[aA][lL][tT]:") or srText:find("^[^:,;\n]+%*[rR][eE][cC][rR][uU][iI][tT]:"))) then
             rsrText = srText;
             srText = "";
@@ -124,13 +124,13 @@ function Importer:draw()
 
         if (rsrText ~= "") then
             if (GL.RollingSR:parseImportString(rsrText)) then
-                GL:success("Rolling SR extra rolls imported successfully");
+                GL:success("Soft Reserve+ extra rolls imported successfully");
                 GL.RollingSR:broadcast();
                 if (srText == "") then
                     self:close();
                 end
             else
-                GL:warning("Failed to parse Rolling SR extra rolls data");
+                GL:warning("Failed to parse Soft Reserve+ extra rolls data");
             end
         elseif (srText == "") then
             GL.SoftRes:import("", true);

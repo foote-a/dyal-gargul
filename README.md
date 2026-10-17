@@ -1,17 +1,17 @@
-# Dyal Gargul — Rolling SR Edition
+# Dyal Gargul — Soft Reserve+ Edition
 
 > [!IMPORTANT]
 > **Fork Notice & Upstream Attribution:**
 > This repository is a specialized fork of the official [Gargul](https://github.com/papa-smurf/Gargul) World of Warcraft addon created by **Zhorax** ([CurseForge](https://www.curseforge.com/wow/addons/gargul) | [Wago](https://addons.wago.io/addons/gargul) | [Patreon](https://www.patreon.com/gargul)).
 >
-> This fork exists specifically to implement our guild's custom **Two-Phase Rolling Soft Reserve ("Rolling SR")** loot system with weekly bonus roll accumulation, Mains vs. Alts eligibility rules, and Google Sheets Apps Script integration.
+> This fork exists specifically to implement our guild's custom **Two-Phase Soft Reserve+ ("Soft Reserve+")** loot system with weekly bonus roll accumulation, Mains vs. Alts eligibility rules, and Google Sheets Apps Script integration.
 >
 > **For all other use cases** (standard GDKP, traditional SoftRes, That's My Bis / TMB, ClassicPR, RRobin, standard +1 systems, and general Master Loot management), **we strongly recommend using the official upstream Gargul addon:**
 > - **Official GitHub:** [https://github.com/papa-smurf/Gargul](https://github.com/papa-smurf/Gargul)
 > - **Official CurseForge:** [https://www.curseforge.com/wow/addons/gargul](https://www.curseforge.com/wow/addons/gargul)
 > - **Official Wago:** [https://addons.wago.io/addons/gargul](https://addons.wago.io/addons/gargul)
 >
-> Please only use this fork if you specifically need the Rolling SR loot rules documented below.
+> Please only use this fork if you specifically need the Soft Reserve+ loot rules documented below.
 
 ---
 
@@ -84,16 +84,16 @@
 1. Open your Google Sheet and click **Extensions → Apps Script**.
 2. Replace any code in `Code.gs` with the full contents of [`Scripts/RollingSR_Code.gs`](Scripts/RollingSR_Code.gs).
 3. Press **Save** (`Ctrl + S`) and reload your Google Sheet tab.
-4. A custom **Rolling SR** menu will appear in the top toolbar.
+4. A custom **Soft Reserve+** menu will appear in the top toolbar.
 
 ### Step 2: One-Click Tab Initialization
-Click **Rolling SR → 🚀 Initialize / Repair Sheet Tabs** (or run `setupAllTabs` directly from the Apps Script editor dropdown). This automatically creates and formats all 4 tabs:
+Click **Soft Reserve+ → 🚀 Initialize / Repair Sheet Tabs** (or run `setupAllTabs` directly from the Apps Script editor dropdown). This automatically creates and formats all 4 tabs:
 
 1. **`Roster_And_Rolls` (Guild Roster Only):**
    - Headers: `PlayerName | Status | Item_1_Name | Item_1_ExtraRolls | Item_2_Name | Item_2_ExtraRolls | Consecutive_Misses | Last_Raid_Date`
    - Column A: Guild character names (Title Case, e.g., `Thrall`, `Jaina`, `Dyalalt`).
    - Column B: Dropdown with allowed statuses (`Member`, `Recruit`, `Alt`, `Benched`).
-   - **Linking an Alt to a Main (1-Click or Manual):** Click **Rolling SR → 🔗 Register / Link Alt to Main** to automatically add the Alt to both `Roster_And_Rolls` (`Status = Alt (MainName)`) and `Aliases` (`AltName | MainName | Alt`), or enter them manually on the sheets.
+   - **Linking an Alt to a Main (1-Click or Manual):** Click **Soft Reserve+ → 🔗 Register / Link Alt to Main** to automatically add the Alt to both `Roster_And_Rolls` (`Status = Alt (MainName)`) and `Aliases` (`AltName | MainName | Alt`), or enter them manually on the sheets.
    - **Never list Pugs here.**
 2. **`CSV_Import`:**
    - Headers: `Name | Class | ItemId | ItemName | Note | Plus`
@@ -126,7 +126,7 @@ The system supports up to 4 raids running simultaneously:
 ```
 [Phase A: Pre-Raid]
   1. Mark Benched raiders in Roster_And_Rolls (or Excuse Absences)
-  2. Copy Addon_Export!A1 (or click "Rolling SR > View / Copy Addon String")
+  2. Copy Addon_Export!A1 (or click "Soft Reserve+ > View / Copy Addon String")
   3. Import in-game via "/rsr <string>" or "/gl sr" (auto-broadcasts to all MLs!)
                  │
                  ▼
@@ -143,16 +143,16 @@ The system supports up to 4 raids running simultaneously:
 [Phase C: Post-Raid]
   1. Run "/rsr won" in-game and copy the won-items string
   2. Paste softres.it CSV(s) into CSV_Import (and optional "/rsr won" string into Addon_Export!A3)
-  3. Click "Rolling SR > Preview & Review (Dry Run)"
-  4. Click "Rolling SR > Process Weekly SRs (Commit)" (or "Import Won Items String")
+  3. Click "Soft Reserve+ > Preview & Review (Dry Run)"
+  4. Click "Soft Reserve+ > Process Weekly SRs (Commit)" (or "Import Won Items String")
 ```
 
 ### Phase A: Pre-Raid Setup
 1. **Bench Check:** In `Roster_And_Rolls`, set Column B (`Status`) to **`Benched`** for any benched guild members.
-2. **Copy Export String:** Copy Cell `A1` from `Addon_Export` (or click **Rolling SR → 📋 View / Copy Addon String**).
+2. **Copy Export String:** Copy Cell `A1` from `Addon_Export` (or click **Soft Reserve+ → 📋 View / Copy Addon String**).
 3. **Import In-Game:**
-   - Run `/rsr <pasted_string>` **OR** open `/gl sr` and paste the SoftRes CSV and Rolling SR string into the Importer window.
-   - Gargul **automatically broadcasts** the imported Rolling SR data to your raid group or guild, syncing all other Master Looters instantly.
+   - Run `/rsr <pasted_string>` **OR** open `/gl sr` and paste the SoftRes CSV and Soft Reserve+ string into the Importer window.
+   - Gargul **automatically broadcasts** the imported Soft Reserve+ data to your raid group or guild, syncing all other Master Looters instantly.
 4. **Raider Self-Service Whispers:**
    - Raiders can whisper `!rsr`, `!rolls`, or `!sr` to the Master Looter at any time to receive an automatic whisper reply with their reserved items and Phase 2 roll counts.
 
@@ -176,9 +176,9 @@ The system supports up to 4 raids running simultaneously:
 ### Phase C: Post-Raid Sheet Processing & Won-Items Export
 1. At the end of the raid, type **`/rsr won`** in-game to copy the compact won-items string (`Player1:Item1;Player2:Item2;`).
 2. Export the SoftRes.it CSV(s) after raid and paste into `CSV_Import` (or `CSV_Raid1..4`).
-3. *(Optional)* Paste the `/rsr won` string into **`Addon_Export!A3`** (or run **Rolling SR → 📥 Import Won Items String (/rsr won)** at any time).
-4. Click **Rolling SR → 🔍 Preview & Review (Dry Run)** to inspect attendance, Alt-protected Mains, and any unmatched names.
-5. Click **Rolling SR → ⚡ Process Weekly SRs (Commit)**:
+3. *(Optional)* Paste the `/rsr won` string into **`Addon_Export!A3`** (or run **Soft Reserve+ → 📥 Import Won Items String (/rsr won)** at any time).
+4. Click **Soft Reserve+ → 🔍 Preview & Review (Dry Run)** to inspect attendance, Alt-protected Mains, and any unmatched names.
+5. Click **Soft Reserve+ → ⚡ Process Weekly SRs (Commit)**:
    - Automatically saves a timestamped backup tab (`Archive_YYYY-MM-DD`).
    - Updates all roll streaks, protects Mains whose Alt attended, applies any won-items string in `Addon_Export!A3`, and refreshes `Addon_Export!A1` for next week.
 
@@ -186,7 +186,7 @@ The system supports up to 4 raids running simultaneously:
 
 ## 5. Complete Command & Menu Reference
 
-### A. Google Sheet `Rolling SR` Menu
+### A. Google Sheet `Soft Reserve+` Menu
 | Menu Item | Description |
 |:---|:---|
 | **🔍 Preview & Review (Dry Run)** | Previews attendance, Alt-protected Mains, alias matches, absent members, and unmatched names without modifying data. |
@@ -209,35 +209,40 @@ The system supports up to 4 raids running simultaneously:
 
 ### B. Loot Master (Master Looter / Officer) Commands In-Game
 
-#### 1. Rolling SR Commands (`/rsr` — All 1–2 Words!)
-*(Note: `/gl rsr ...` also works as a legacy alias for `/rsr ...`)*
+#### 1. Soft Reserve+ Commands (`/srp`, `/rsr`, or `/srplus` — All 1–2 Words!)
 
-| Command | Description |
-|:---|:---|
-| **`/rsr`** | Shows loaded player count, max roll cap, Alt bonus roll state, and command list. |
-| **`/rsr <string>`** | Imports the `Addon_Export!A1` string and auto-broadcasts to raid/guild. |
-| **`/rsr list`** | Lists all loaded guild Mains, Alts, and their stored bonus rolls in chat. |
-| **`/rsr <player>`** | Checks stored bonus rolls & Main/Alt/Pug status for a player (e.g. `/rsr Thrall`). |
-| **`/rsr won`** | Displays & opens a copyable dialog with the session's won-items string (`Player:Item;`) for Google Sheets. |
-| **`/rsr clearwon`** | Clears only the session's won-items export log. |
-| **`/rsr sync`** | Manually broadcasts loaded bonus rolls to your raid group or guild. |
-| **`/rsr guild`** | Manually broadcasts loaded bonus rolls specifically to guild Master Looters. |
-| **`/rsr raid`** | Manually broadcasts loaded bonus rolls specifically to raid/group Master Looters. |
-| **`/rsr max <num>`** | Views or updates the maximum accumulated extra rolls cap (default `100`). |
-| **`/rsr altrolls`** | Toggles whether Alts can accrue/spend bonus rolls when no Main reserved (`on` / `off`). |
-| **`/rsr clear`** | Clears all stored Rolling SR data and won-item logs. |
-| **`/rsr test`** | Enables solo in-game test mode with two Vanilla Molten Core items (`18832` and `18820`). |
-| **`/rsr sim`** | Simulates standard rolls during an active test roll-off (Phase 1, Tie-Break, or Phase 2). |
-| **`/rsr simpug`** | Simulates a Pug rolling `99` in Phase 1 to test Pug winning Phase 1 outright. |
-| **`/rsr simalt`** | Simulates an Alt rolling `97` over a Pug in Phase 1 to test Alt triggering Phase 2. |
-| **`/rsr tie`** | Simulates a Phase 1 tie (`95`) between a Pug and Guild member/Alt to test tie-breaker rounds. |
-| **`/rsr simwon`** | Simulates awarding the item to test extra-roll reset and `/rsr won` without needing a boss corpse. |
+> [!NOTE]
+> **Complete Command Interchangeability:**
+> Every command below can be run using **`/srp`**, **`/rsr`**, or **`/srplus`** (or through Gargul via **`/gl srp ...`** or **`/gl rsr ...`**). They are identical engine-level aliases with 100% feature parity.
+
+| Primary Command | Alias | Description |
+|:---|:---|:---|
+| **`/srp`** | **`/rsr`** | Shows loaded player count, max roll cap, Alt bonus roll state, and command list. |
+| **`/srp ro <item>`** | **`/rsr ro <item>`** | Starts a roll-off directly for an item name, itemID, or link (e.g. `/srp ro 6948` or `/srp 6948`). |
+| **`/srp <string>`** | **`/rsr <string>`** | Imports the `Addon_Export!A1` string and auto-broadcasts to raid/guild. |
+| **`/srp alias <a> <b>`** | **`/rsr alias <a> <b>`** | Maps SoftRes or sheet name `a` to in-game character `b` (updates live reserves & bonus rolls). |
+| **`/srp list`** | **`/rsr list`** | Lists all loaded guild Mains, Alts, and their stored bonus rolls in chat. |
+| **`/srp <player>`** | **`/rsr <player>`** | Checks stored bonus rolls & Main/Alt/Pug status for a player (e.g. `/srp Thrall`). |
+| **`/srp won`** | **`/rsr won`** | Displays & opens a copyable dialog with the session's won-items string (`Player:Item;`) for Google Sheets. |
+| **`/srp clearwon`** | **`/rsr clearwon`** | Clears only the session's won-items export log. |
+| **`/srp sync`** | **`/rsr sync`** | Manually broadcasts loaded bonus rolls to your raid group or guild. |
+| **`/srp guild`** | **`/rsr guild`** | Manually broadcasts loaded bonus rolls specifically to guild Master Looters. |
+| **`/srp raid`** | **`/rsr raid`** | Manually broadcasts loaded bonus rolls specifically to raid/group Master Looters. |
+| **`/srp max <num>`** | **`/rsr max <num>`** | Views or updates the maximum accumulated extra rolls cap (default `100`). |
+| **`/srp altrolls`** | **`/rsr altrolls`** | Toggles whether Alts can accrue/spend bonus rolls when no Main reserved (`on` / `off`). |
+| **`/srp clear`** | **`/rsr clear`** | Clears all stored Soft Reserve+ data and won-item logs. |
+| **`/srp test`** | **`/rsr test`** | Enables solo in-game test mode with two cached items (`6948` Hearthstone and `7005` Skinning Knife). |
+| **`/srp sim`** | **`/rsr sim`** | Simulates standard rolls during an active test roll-off (Phase 1, Tie-Break, or Phase 2). |
+| **`/srp simpug`** | **`/rsr simpug`** | Simulates a Pug rolling `99` in Phase 1 to test Pug winning Phase 1 outright. |
+| **`/srp simalt`** | **`/rsr simalt`** | Simulates an Alt rolling `97` over a Pug in Phase 1 to test Alt triggering Phase 2. |
+| **`/srp tie`** | **`/rsr tie`** | Simulates a Phase 1 tie (`95`) between a Pug and Guild member/Alt to test tie-breaker rounds. |
+| **`/srp simwon`** | **`/rsr simwon`** | Simulates awarding the item to test extra-roll reset and `/srp won` without needing a boss corpse. |
 
 #### 2. Gargul Master Looter Commands (`/gl`)
 | Command | Shorthand | Description |
 |:---|:---|:---|
 | **`/gl rolloff [item]`** | **`/gl ro [item]`** | Opens the Master Looter Roll-Off window (accepts an item link or numeric item ID, e.g., `/gl ro 18832`). |
-| **`/gl softreserves`** | **`/gl sr`** | Opens the SoftRes Importer (paste SoftRes CSV + Rolling SR string) or SoftRes Overview window. |
+| **`/gl softreserves`** | **`/gl sr`** | Opens the SoftRes Importer (paste SoftRes CSV + Soft Reserve+ string) or SoftRes Overview window. |
 | **`/gl award [winner] [item]`**| **`/gl a`** | Opens the Award window or directly awards an item to a player. |
 | **`/gl awardondate`** | **`/gl aod`** | Retroactively awards an item on a specific date: `/gl aod [winner] [yy-mm-dd] [itemLink]`. |
 | **`/gl awardhistory`** | **`/gl ah`** | Opens the Award History window showing all awarded items and rolls. |
@@ -296,7 +301,7 @@ Players in the raid can use the following whispers, rolls, and slash commands at
 
 ### A. In-Game Solo Test Mode (Test Every Feature Without a Raid or Sheet!)
 
-You can test **every single feature** of Rolling SR solo in-game in under a minute. Start by enabling test mode:
+You can test **every single feature** of Soft Reserve+ solo in-game in under a minute. Start by enabling test mode:
 
 ```text
 /rsr test
@@ -367,8 +372,8 @@ Uses the bundled Lua 5.1 interpreter (`Scripts\bin\lua5.1.exe`) to compile and v
 .\Scripts\bin\lua5.1.exe .\Scripts\validate_lua.lua
 ```
 
-#### 2. Run Rolling SR Addon Unit Tests (27 Test Suites)
-Tests string parsing, Phase 1 gating, Pug outright wins, single and multi-round tie-breaks, guild-only ties, Phase 2 roll caps, winner determination, award roll resets, `/rsr won` award export strings, Mains vs. Alts Phase 1 & Phase 2 rules, configurable Alt roll accumulation (`/rsr altrolls`), configurable max roll cap (`/rsr max`), live UI counters, 1–2 word `/rsr` commands, auto-broadcasting, `!rsr`/`!rolls` whispers, Unicode quote normalization, and all solo test simulator modes (`/rsr test`, `/rsr simpug`, `/rsr simwon`):
+#### 2. Run Soft Reserve+ Addon Unit Tests (32 Test Suites)
+Tests string parsing, Phase 1 gating, Pug outright wins, single and multi-round tie-breaks, guild-only ties, Phase 2 roll caps, winner determination, award roll resets, `/srp won` award export strings, Mains vs. Alts Phase 1 & Phase 2 rules, configurable Alt roll accumulation (`/srp altrolls`), configurable max roll cap (`/srp max`), live UI counters, 1–2 word `/srp` & `/rsr` commands, full `/srp` / `/srplus` / `/rsr` alias interchangeability, auto-broadcasting, `!rsr`/`!rolls`/`!srp` whispers, Unicode quote normalization, and all solo test simulator modes (`/srp test`, `/srp simpug`, `/srp simwon`):
 ```powershell
 .\Scripts\bin\lua5.1.exe .\Scripts\test_rolling_sr.lua
 ```

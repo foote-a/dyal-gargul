@@ -93,14 +93,15 @@ end
 ---@test /dump _G.Gargul:dehydrateItemLink("|cffa335ee|Hitem:19019:::::::::::::|h[Thunderfury, Blessed Blade of the Windseeker]|h|r");
 ---@test /script _G.Gargul.Test.ItemLinks:roundTrip()
 function GL:dehydrateItemLink(itemLink)
-    if (type(itemLink) ~= "string"
-        or itemLink == ""
-    ) then
+    itemLink = tostring(itemLink or "");
+    if (itemLink == "") then
         return false;
     end
 
     -- Grab the hyperlink body, falling back to a bare item string if one was passed
-    local itemString = strmatch(itemLink, "|H(item[:%d%-]+)") or strmatch(itemLink, "^(item[:%d%-]+)$");
+    local itemString = strmatch(itemLink, "|H(item[:%d%-]+)")
+        or strmatch(itemLink, "^(item[:%d%-]+)$")
+        or (strmatch(itemLink, "^%d+$") and ("item:" .. itemLink));
     if (not itemString) then
         return false;
     end

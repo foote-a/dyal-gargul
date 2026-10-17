@@ -334,6 +334,7 @@ function MasterLooterUI:draw(itemLink)
             RSRStatusLabel:SetHeight(20);
             FirstRow:AddChild(RSRStatusLabel);
             GL.Interface:set(self, "Label.RSRStatus", RSRStatusLabel);
+            GL.Interface:set(self, "RSRStatus", RSRStatusLabel);
 
         --[[
             SECOND ROW
@@ -1330,17 +1331,28 @@ end
 function MasterLooterUI:updateWidgets()
     self:updateShareGearButton();
 
+    local StartButton = GL.Interface:get(self, "Button.Start");
+    local StopButton = GL.Interface:get(self, "Button.Stop");
+    local EditBoxItem = GL.Interface:get(self, "EditBox.Item");
+    local AwardButton = GL.Interface:get(self, "Button.Award");
+    local DisenchantButton = GL.Interface:get(self, "Button.Disenchant");
+    local ClearButton = GL.Interface:get(self, "Button.Clear");
+    local RSRStatus = GL.Interface:get(self, "Label.RSRStatus") or GL.Interface:get(self, "RSRStatus");
+
+    if (not StartButton and not StopButton and not EditBoxItem) then
+        return;
+    end
+
     -- If the itembox doesn't hold a valid item link then:
     --   The start button should not be available
     --   The stop button should be available
     --   The item box should be available
     if (not MasterLooterUI.ItemBoxHoldsValidItem) then
-        GL.Interface:get(self, "Button.Start"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Stop"):SetDisabled(true);
-        GL.Interface:get(self, "EditBox.Item"):SetDisabled(false);
-        GL.Interface:get(self, "EditBox.Item"):SetDisabled(false);
-        GL.Interface:get(self, "Button.Award"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Disenchant"):SetDisabled(true);
+        if (StartButton) then StartButton:SetDisabled(true); end
+        if (StopButton) then StopButton:SetDisabled(true); end
+        if (EditBoxItem) then EditBoxItem:SetDisabled(false); end
+        if (AwardButton) then AwardButton:SetDisabled(true); end
+        if (DisenchantButton) then DisenchantButton:SetDisabled(true); end
 
         return;
     end
@@ -1348,72 +1360,58 @@ function MasterLooterUI:updateWidgets()
     -- The value in the itembox is valid (e.g. contains a valid item link)
 
     -- If no roll off is currently in progress then:
-    --   The start button should be available
-    --   The stop button should not be available
-    --   The award button should not be available
-    --   The clear button should not be available
-    --   The item box should be available so we can enter an item link
     if (not GL.RollOff.inProgress) then
-        GL.Interface:get(self, "Button.Start"):SetDisabled(false);
-        GL.Interface:get(self, "Button.Stop"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Award"):SetDisabled(false);
-        GL.Interface:get(self, "Button.Disenchant"):SetDisabled(false);
-        GL.Interface:get(self, "Button.Clear"):SetDisabled(false);
-        GL.Interface:get(self, "EditBox.Item"):SetDisabled(false);
+        if (StartButton) then StartButton:SetDisabled(false); end
+        if (StopButton) then StopButton:SetDisabled(true); end
+        if (AwardButton) then AwardButton:SetDisabled(false); end
+        if (DisenchantButton) then DisenchantButton:SetDisabled(false); end
+        if (ClearButton) then ClearButton:SetDisabled(false); end
+        if (EditBoxItem) then EditBoxItem:SetDisabled(false); end
 
     -- Start was clicked but the comm echo hasn't landed yet: keep Stop locked
-    -- so the user can't send a spurious stopRollOff before the roll is live.
     elseif (GL.RollOff.pendingStart) then
-        GL.Interface:get(self, "Button.Start"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Stop"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Award"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Disenchant"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Clear"):SetDisabled(true);
-        GL.Interface:get(self, "EditBox.Item"):SetDisabled(true);
+        if (StartButton) then StartButton:SetDisabled(true); end
+        if (StopButton) then StopButton:SetDisabled(true); end
+        if (AwardButton) then AwardButton:SetDisabled(true); end
+        if (DisenchantButton) then DisenchantButton:SetDisabled(true); end
+        if (ClearButton) then ClearButton:SetDisabled(true); end
+        if (EditBoxItem) then EditBoxItem:SetDisabled(true); end
 
     -- If a roll off is currently in progress then:
-    --   The start button should not be available
-    --   The stop button should be available
-    --   The award button should not be available
-    --   The clear button should not be available
-    --   The item box should not be available
     else
-        GL.Interface:get(self, "Button.Start"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Stop"):SetDisabled(false);
-        GL.Interface:get(self, "Button.Award"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Disenchant"):SetDisabled(true);
-        GL.Interface:get(self, "Button.Clear"):SetDisabled(true);
-        GL.Interface:get(self, "EditBox.Item"):SetDisabled(true);
+        if (StartButton) then StartButton:SetDisabled(true); end
+        if (StopButton) then StopButton:SetDisabled(false); end
+        if (AwardButton) then AwardButton:SetDisabled(true); end
+        if (DisenchantButton) then DisenchantButton:SetDisabled(true); end
+        if (ClearButton) then ClearButton:SetDisabled(true); end
+        if (EditBoxItem) then EditBoxItem:SetDisabled(true); end
     end
 
-    local StopButton = GL.Interface:get(self, "Button.Stop");
-    local RSRStatus = GL.Interface:get(self, "Label.RSRStatus");
-
-    if (GL.RollOff.inProgress and GL.RollingSR and GL.RollingSR:isActive()) then
-        if (GL.RollingSR:isPhase1()) then
-            if (GL.RollingSR.round > 0) then
-                StopButton:SetText(L["End Tie-Break"]);
-                StopButton:SetWidth(105);
-            else
-                StopButton:SetText(L["Stop Phase 1"]);
+    if (StopButton) then
+        if (GL.RollOff.inProgress and GL.RollingSR and GL.RollingSR:isActive()) then
+            if (GL.RollingSR:isPhase1()) then
+                if (GL.RollingSR.round > 0) then
+                    StopButton:SetText(L["End Tie-Break"]);
+                    StopButton:SetWidth(105);
+                else
+                    StopButton:SetText(L["Stop Phase 1"]);
+                    StopButton:SetWidth(95);
+                end
+            elseif (GL.RollingSR:isPhase2()) then
+                StopButton:SetText(L["Stop Phase 2"]);
                 StopButton:SetWidth(95);
             end
-        elseif (GL.RollingSR:isPhase2()) then
-            StopButton:SetText(L["Stop Phase 2"]);
-            StopButton:SetWidth(95);
-        end
-
-        if (RSRStatus) then
-            local item = GL.RollOff.CurrentRollOff.itemLink or GL.RollOff.CurrentRollOff.itemName;
-            RSRStatus:SetText(GL.RollingSR:getStatusText(item));
-        end
-    else
-        if (StopButton) then
+        else
             StopButton:SetText(L["Stop"]);
             StopButton:SetWidth(60);
         end
+    end
 
-        if (RSRStatus) then
+    if (RSRStatus) then
+        if (GL.RollOff.inProgress and GL.RollingSR and GL.RollingSR:isActive() and GL.RollOff.CurrentRollOff) then
+            local item = GL.RollOff.CurrentRollOff.itemLink or GL.RollOff.CurrentRollOff.itemName;
+            RSRStatus:SetText(GL.RollingSR:getStatusText(item));
+        else
             RSRStatus:SetText("");
         end
     end

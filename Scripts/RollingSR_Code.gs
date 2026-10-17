@@ -1,5 +1,5 @@
 /**
- * Rolling SR — Google Apps Script for tracking per-item soft-reserve extra rolls.
+ * Soft Reserve+ — Google Apps Script for tracking per-item soft-reserve extra rolls.
  *
  * Sheet tabs:
  *   Roster_And_Rolls  — Master guild roster with accumulated extra rolls (never Pugs).
@@ -7,7 +7,7 @@
  *   Addon_Export      — Cell A1 holds the plain-text import string for Gargul.
  *   Aliases           — Maps alt characters, nicknames, or typos to Roster_Character_Name.
  *
- * Use the custom "Rolling SR" menu in Google Sheets to preview, commit, manage streaks,
+ * Use the custom "Soft Reserve+" menu in Google Sheets to preview, commit, manage streaks,
  * initialize tabs, or generate the Gargul addon export string.
  */
 
@@ -537,7 +537,7 @@ function previewWeeklySoftReserves() {
   lines.push("NOTE: No changes have been saved to your spreadsheet.");
 
   var ui = SpreadsheetApp.getUi();
-  ui.alert("Rolling SR — Preview & Review", lines.join("\n"), ui.ButtonSet.OK);
+  ui.alert("Soft Reserve+ — Preview & Review", lines.join("\n"), ui.ButtonSet.OK);
 }
 
 /**
@@ -584,7 +584,7 @@ function processWeeklySoftReserves() {
         ui.ButtonSet.YES_NO
       );
       if (resp !== ui.Button.YES) {
-        ss.toast("Update cancelled by user.", "Rolling SR", 5);
+        ss.toast("Update cancelled by user.", "Soft Reserve+", 5);
         return;
       }
     } catch (e) {
@@ -679,7 +679,7 @@ function processWeeklySoftReserves() {
   if (pugsIgnored.length > 0) {
     msg += " Ignored " + pugsIgnored.length + " pug(s).";
   }
-  ss.toast(msg, "Rolling SR", 10);
+  ss.toast(msg, "Soft Reserve+", 10);
 }
 
 /**
@@ -765,7 +765,7 @@ function applyWonItemsString(wonString, ss) {
   var results = [];
 
   var clean = (wonString || "").toString().trim();
-  clean = clean.replace(/^\/?(?:gl\s+)?rsr\s+won\s*/i, "").trim();
+  clean = clean.replace(/^\/?(?:gl\s+)?(?:rsr|srp|srplus|softreserveplus)\s+won\s*/i, "").trim();
   if (!clean) return results;
 
   var entries = clean.split(";");
@@ -803,8 +803,8 @@ function importWonItemsDialog() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var resp = ui.prompt(
-    "📥 Import Won Items String (From /rsr won)",
-    "Run '/rsr won' in-game after your raid and paste the exported string below\n(Format: Player1:Item1;Player2:Item2;):",
+    "📥 Import Won Items String (From /srp won or /rsr won)",
+    "Run '/srp won' (or '/rsr won') in-game after your raid and paste the exported string below\n(Format: Player1:Item1;Player2:Item2;):",
     ui.ButtonSet.OK_CANCEL
   );
   if (resp.getSelectedButton() !== ui.Button.OK) return;
@@ -940,7 +940,7 @@ function excuseAbsenceDialog() {
 
   // Reset misses to 0
   sheet.getRange(entry.row, COL.MISSES + 1, 1, 1).setValue(0);
-  ss.toast("Absence excused for " + canonical + ". Consecutive misses reset to 0.", "Rolling SR", 5);
+  ss.toast("Absence excused for " + canonical + ". Consecutive misses reset to 0.", "Soft Reserve+", 5);
 }
 
 /**
@@ -1014,7 +1014,7 @@ function createRosterSnapshot(silent) {
       SpreadsheetApp.getUi().ButtonSet.OK
     );
   } else {
-    ss.toast("Auto-backup created: " + sheetName, "Rolling SR", 3);
+    ss.toast("Auto-backup created: " + sheetName, "Soft Reserve+", 3);
   }
 }
 
@@ -1058,7 +1058,7 @@ function showLeaderboardAndStats() {
   streaks.sort(function (a, b) { return b.rolls - a.rolls; });
 
   var lines = [];
-  lines.push("=== ROLLING SR DASHBOARD ===");
+  lines.push("=== SOFT RESERVE+ DASHBOARD ===");
   lines.push("");
   lines.push("👥 Roster Breakdown:");
   lines.push("  Members: " + statusCounts.Member + " | Recruits: " + statusCounts.Recruit + " | Alts: " + statusCounts.Alt + " | Benched: " + statusCounts.Benched);
@@ -1083,7 +1083,7 @@ function showLeaderboardAndStats() {
     lines.push("  ✓ No raiders currently at risk of streak resets.");
   }
 
-  ui.alert("Rolling SR — Analytics & Streaks", lines.join("\n"), ui.ButtonSet.OK);
+  ui.alert("Soft Reserve+ — Analytics & Streaks", lines.join("\n"), ui.ButtonSet.OK);
 }
 
 /**
@@ -1213,7 +1213,7 @@ function showExportStringDialog() {
 
   ui.alert(
     "📋 Copy Addon Export String",
-    "Copy the string below (or from Addon_Export!A1) and run in-game:\n\n/rsr " + output,
+    "Copy the string below (or from Addon_Export!A1) and run in-game:\n\n/srp " + output + "\n(or /rsr " + output + ")",
     ui.ButtonSet.OK
   );
 }
@@ -1229,7 +1229,7 @@ function generateDiscordSummary() {
 
   var roster = readRoster(sheet);
   var lines = [];
-  lines.push("**🎲 Rolling SR — Weekly Bonus Rolls Summary (" + todayStamp() + ")**");
+  lines.push("**🎲 Soft Reserve+ — Weekly Bonus Rolls Summary (" + todayStamp() + ")**");
   lines.push("```");
 
   var names = Object.keys(roster).sort();
@@ -1477,12 +1477,12 @@ function isRecruitInTrial(entry) {
  */
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu("Rolling SR")
+    .createMenu("Soft Reserve+")
     .addItem("🔍 Preview & Review (Dry Run)", "previewWeeklySoftReserves")
     .addItem("⚡ Process Weekly SRs (Commit)", "processWeeklySoftReserves")
     .addItem("📋 View / Copy Addon String", "showExportStringDialog")
     .addSeparator()
-    .addItem("📥 Import Won Items String (/rsr won)", "importWonItemsDialog")
+    .addItem("📥 Import Won Items String (/srp won or /rsr won)", "importWonItemsDialog")
     .addItem("🏆 Mark Item Won (Manual)", "markItemWonDialog")
     .addItem("🔗 Register / Link Alt to Main", "linkAltDialog")
     .addItem("🌴 Excuse Absence / Vacation", "excuseAbsenceDialog")
